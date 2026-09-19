@@ -83,9 +83,13 @@ function extractPageContent(): ExtractedPage {
   }
 }
 
-async function summarizeActiveTab(): Promise<Thread> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-  if (!tab?.id || !tab.url) throw new Error('No active tab.')
+async function summarizeActiveTab(tabId: number): Promise<Thread> {
+  // tabId is resolved by the side panel itself (window-scoped, reliable) and
+  // passed in — chrome.tabs.query({currentWindow: true}) run from here in
+  // the background service worker has no window of its own to be "current"
+  // against, and can silently resolve to the wrong window or none at all.
+  const tab = await chrome.tabs.get(tabId)
+  if (!tab?.id || !tab.url) throw new Error('Could not read that tab — try again from a normal web page.')
 
   const settings = await getSettings()
   const provider = getProvider(settings) // throws a clear error if the selected provider's key is missing
@@ -195,7 +199,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'SUMMARIZE_ACTIVE_TAB') {
-    summarizeActiveTab()
+    summarizeActiveTab(message.tabId)
       .then((thread) => sendResponse({ ok: true, thread }))
       .catch((err) => sendResponse({ ok: false, error: String(err.message ?? err) }))
     return true // keep the message channel open for the async response

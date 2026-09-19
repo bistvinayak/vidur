@@ -26,7 +26,19 @@ export default function App() {
   async function handleSummarize() {
     setBusy(true)
     setError(undefined)
-    const res = await chrome.runtime.sendMessage({ type: 'SUMMARIZE_ACTIVE_TAB' })
+
+    // Resolved here, not in the background service worker: a service worker
+    // has no window of its own, so chrome.tabs.query({currentWindow: true})
+    // called from there resolves against an ambiguous "last focused window"
+    // instead of the window this panel is actually docked to. The side panel
+    // itself is window-scoped, so this query is reliable from here.
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab?.id) {
+      setBusy(false)
+      return setError('Could not find the active tab — try clicking on the page first, then Summarize again.')
+    }
+
+    const res = await chrome.runtime.sendMessage({ type: 'SUMMARIZE_ACTIVE_TAB', tabId: tab.id })
     setBusy(false)
     if (!res.ok) return setError(res.error)
     await refreshThreads()
