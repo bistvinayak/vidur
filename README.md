@@ -103,15 +103,15 @@ up front.
 
 ## Known limitations to fix before this goes beyond your own machine
 
-- **Image URLs are sent as-is** to the model rather than fetched and base64-encoded.
-  Works for public images; will silently fail to "see" an image behind auth or
-  certain CDNs. Swap in a fetch-and-encode step in `src/lib/openrouter.ts` if
-  that turns out to matter.
-- **The free-model fallback chain is hardcoded** in `src/lib/openrouter.ts`.
-  OpenRouter's free roster changes often — if a model in the list gets pulled
-  entirely (not just rate-limited), update that file. Worth moving to a small
-  remote JSON config later so this doesn't require a new Chrome Web Store
-  submission every time.
+- **Image URLs are sent as-is to OpenRouter/OpenAI** rather than fetched and
+  base64-encoded (the Anthropic adapter already does this properly — Claude's
+  vision input requires it). Works for public images; will silently fail to
+  "see" an image behind auth or certain CDNs on the other two providers.
+- **The free-model list is hardcoded** in `src/lib/types.ts`
+  (`OPENROUTER_FREE_MODELS`). OpenRouter's free roster changes often — if a
+  model in the list gets pulled entirely (not just rate-limited), update it
+  there. Worth moving to a small remote JSON config later so this doesn't
+  require a new Chrome Web Store submission every time.
 - **No rate-limit/retry backoff beyond what OpenRouter's `models` fallback
   already does** — if all three chain entries are down at once, the user just
   sees the error.
