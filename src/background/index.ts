@@ -170,10 +170,17 @@ chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !tab.url) return // e.g. a chrome:// page — nothing to summarize
 
   try {
-    await chrome.storage.local.set({ [IN_FLIGHT_KEY]: tab.id })
+    await chrome.storage.local.set({ [IN_FLIGHT_KEY]: tab.id, lastError: null })
     await runSummarize(tab)
   } catch (err) {
+    // This is the one trigger path with no direct caller waiting on a
+    // response to show an error to — without writing it somewhere the panel
+    // can see, a failure here (like the request-timeout case above) is
+    // invisible: the spinner just stops with nothing in History and no clue
+    // why, indistinguishable from a hang unless you happen to have the
+    // service worker's console open.
     console.error('Vidur: summarize on icon click failed:', err)
+    await chrome.storage.local.set({ lastError: { message: String((err as Error)?.message ?? err), at: Date.now() } })
   } finally {
     await chrome.storage.local.remove(IN_FLIGHT_KEY)
   }

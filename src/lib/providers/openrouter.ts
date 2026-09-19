@@ -2,9 +2,11 @@ import { OPENROUTER_FREE_MODELS } from '../types'
 import type { ChatMessage, ExtractedPage } from '../types'
 import {
   buildPageIntro,
+  fetchWithTimeout,
   languageInstruction,
   parseFindingsArgs,
   REPORT_FINDINGS_SCHEMA,
+  sanitizeSummaryText,
   type ModelProvider,
   type ProviderCallOpts,
   type ProviderResult,
@@ -31,7 +33,7 @@ function buildChain(preferredModel: string): string[] {
 }
 
 async function callOpenRouter(apiKey: string, models: string[], messages: unknown[]): Promise<ProviderResult> {
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -42,6 +44,7 @@ async function callOpenRouter(apiKey: string, models: string[], messages: unknow
     body: JSON.stringify({
       models,
       messages,
+      max_tokens: 1500, // was unset — a stalled/reasoning free model can run away without this
       tools: [REPORT_FINDINGS_TOOL],
       tool_choice: { type: 'function', function: { name: 'report_findings' } },
     }),
@@ -56,11 +59,20 @@ async function callOpenRouter(apiKey: string, models: string[], messages: unknow
   const toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
   if (!toolCall) {
     // Model ignored tool_choice (happens on some free models, e.g. Inkling
-    // which has no tool calling) — fall back to raw text as the summary.
-    return { summary: data.choices?.[0]?.message?.content ?? '', actionableItems: [], followUps: [] }
+    // which has no tool calling, or a reasoning model that emitted its own
+    // <think>/<tool_call> text instead of a real structured call) — sanitize
+    // before treating raw text as the summary, since it can otherwise carry
+    // leaked chat-template artifacts straight into the UI.
+    return { summary: sanitizeSummaryText(data.choices?.[0]?.message?.content ?? ''), actionableItems: [], followUps: [] }
   }
 
-  return parseFindingsArgs(JSON.parse(toolCall.function.arguments))
+  let args: any
+  try {
+    args = JSON.parse(toolCall.function.arguments)
+  } catch {
+    throw new Error('The model returned a malformed response — try again, or switch models in Settings.')
+  }
+  return parseFindingsArgs(args)
 }
 
 export function createOpenRouterProvider(apiKey: string, preferredModel: string): ModelProvider {

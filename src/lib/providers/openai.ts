@@ -1,9 +1,11 @@
 import type { ChatMessage, ExtractedPage } from '../types'
 import {
   buildPageIntro,
+  fetchWithTimeout,
   languageInstruction,
   parseFindingsArgs,
   REPORT_FINDINGS_SCHEMA,
+  sanitizeSummaryText,
   type ModelProvider,
   type ProviderCallOpts,
   type ProviderResult,
@@ -19,12 +21,13 @@ const TOOL = {
 }
 
 async function callOpenAI(apiKey: string, model: string, messages: unknown[]): Promise<ProviderResult> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
       messages,
+      max_tokens: 1500,
       tools: [TOOL],
       tool_choice: { type: 'function', function: { name: 'report_findings' } },
     }),
@@ -38,9 +41,15 @@ async function callOpenAI(apiKey: string, model: string, messages: unknown[]): P
   const data = await res.json()
   const toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
   if (!toolCall) {
-    return { summary: data.choices?.[0]?.message?.content ?? '', actionableItems: [], followUps: [] }
+    return { summary: sanitizeSummaryText(data.choices?.[0]?.message?.content ?? ''), actionableItems: [], followUps: [] }
   }
-  return parseFindingsArgs(JSON.parse(toolCall.function.arguments))
+  let args: any
+  try {
+    args = JSON.parse(toolCall.function.arguments)
+  } catch {
+    throw new Error('The model returned a malformed response — try again, or switch models in Settings.')
+  }
+  return parseFindingsArgs(args)
 }
 
 export function createOpenAIProvider(apiKey: string, model: string): ModelProvider {

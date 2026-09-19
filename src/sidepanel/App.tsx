@@ -18,7 +18,12 @@ export default function App() {
   useEffect(() => {
     refreshThreads()
     chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => setActiveTabUrl(tab?.url))
-    chrome.storage.local.get('inFlightTabId').then((r) => setAutoSummarizing(Boolean(r.inFlightTabId)))
+    chrome.storage.local
+      .get<{ inFlightTabId?: number; lastError?: { message: string } }>(['inFlightTabId', 'lastError'])
+      .then((r) => {
+        setAutoSummarizing(Boolean(r.inFlightTabId))
+        if (r.lastError) setError(r.lastError.message)
+      })
 
     // The actual "Summarize this page" trigger is now the toolbar icon click
     // (see background/index.ts) — it can complete before this panel has even
@@ -28,6 +33,9 @@ export default function App() {
       if (area !== 'local') return
       if ('inFlightTabId' in changes) setAutoSummarizing(Boolean(changes.inFlightTabId.newValue))
       if ('threads' in changes) refreshThreads()
+      if ('lastError' in changes && changes.lastError.newValue) {
+        setError((changes.lastError.newValue as { message: string }).message)
+      }
     }
     chrome.storage.onChanged.addListener(handleStorageChange)
     return () => chrome.storage.onChanged.removeListener(handleStorageChange)
@@ -52,11 +60,22 @@ export default function App() {
       return setError('Could not find the active tab — try clicking on the page first, then Summarize again.')
     }
 
-    const res = await chrome.runtime.sendMessage({ type: 'SUMMARIZE_ACTIVE_TAB', tabId: tab.id })
-    setBusy(false)
-    if (!res.ok) return setError(res.error)
-    await refreshThreads()
-    setView({ name: 'thread', threadId: res.thread.id })
+    try {
+      // If the background service worker dies mid-request (killed for
+      // exceeding MV3's execution limits, extension reloaded mid-flight,
+      // etc.), this rejects rather than hanging — without the try/catch,
+      // that rejection would skip setBusy(false) entirely and leave the
+      // spinner stuck forever with no error shown, indistinguishable from
+      // an actual hang.
+      const res = await chrome.runtime.sendMessage({ type: 'SUMMARIZE_ACTIVE_TAB', tabId: tab.id })
+      if (!res.ok) return setError(res.error)
+      await refreshThreads()
+      setView({ name: 'thread', threadId: res.thread.id })
+    } catch (err) {
+      setError('Lost connection to the extension — try again. (' + String((err as Error)?.message ?? err) + ')')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function handleSend(text: string) {
@@ -64,10 +83,15 @@ export default function App() {
     setDraft('')
     setBusy(true)
     setError(undefined)
-    const res = await chrome.runtime.sendMessage({ type: 'CONTINUE_THREAD', threadId: activeThread.id, text })
-    setBusy(false)
-    if (!res.ok) return setError(res.error)
-    await refreshThreads()
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'CONTINUE_THREAD', threadId: activeThread.id, text })
+      if (!res.ok) return setError(res.error)
+      await refreshThreads()
+    } catch (err) {
+      setError('Lost connection to the extension — try again. (' + String((err as Error)?.message ?? err) + ')')
+    } finally {
+      setBusy(false)
+    }
   }
 
   if (view.name === 'list') {

@@ -1,9 +1,11 @@
 import type { ChatMessage, ExtractedPage } from '../types'
 import {
   buildPageIntro,
+  fetchWithTimeout,
   languageInstruction,
   parseFindingsArgs,
   REPORT_FINDINGS_SCHEMA,
+  sanitizeSummaryText,
   type ModelProvider,
   type ProviderCallOpts,
   type ProviderResult,
@@ -21,7 +23,7 @@ const TOOL = {
  */
 async function fetchImageAsBase64(url: string): Promise<{ mediaType: string; data: string } | null> {
   try {
-    const res = await fetch(url)
+    const res = await fetchWithTimeout(url, {})
     if (!res.ok) return null
     const mediaType = (res.headers.get('content-type') || 'image/jpeg').split(';')[0]
     const bytes = new Uint8Array(await res.arrayBuffer())
@@ -37,7 +39,7 @@ async function fetchImageAsBase64(url: string): Promise<{ mediaType: string; dat
 }
 
 async function callAnthropic(apiKey: string, model: string, messages: unknown[]): Promise<ProviderResult> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'x-api-key': apiKey,
@@ -62,7 +64,7 @@ async function callAnthropic(apiKey: string, model: string, messages: unknown[])
   const toolUse = data.content?.find((b: any) => b.type === 'tool_use')
   if (!toolUse) {
     const text = data.content?.find((b: any) => b.type === 'text')?.text ?? ''
-    return { summary: text, actionableItems: [], followUps: [] }
+    return { summary: sanitizeSummaryText(text), actionableItems: [], followUps: [] }
   }
   return parseFindingsArgs(toolUse.input)
 }
