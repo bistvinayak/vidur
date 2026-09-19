@@ -19,10 +19,15 @@ const REPORT_FINDINGS_TOOL = {
   },
 }
 
-/** Preferred model first, then the rest of the free roster as automatic fallback. */
+/**
+ * Preferred model first, then up to 2 more of the free roster as fallback —
+ * OpenRouter's `models` array rejects requests with a 400 if given more
+ * than 3 entries total, confirmed against the live API (not documented
+ * clearly beforehand), so this is a hard cap, not a stylistic choice.
+ */
 function buildChain(preferredModel: string): string[] {
   const rest = OPENROUTER_FREE_MODELS.map((m) => m.id).filter((id) => id !== preferredModel)
-  return [preferredModel, ...rest]
+  return [preferredModel, ...rest].slice(0, 3)
 }
 
 async function callOpenRouter(apiKey: string, models: string[], messages: unknown[]): Promise<ProviderResult> {
