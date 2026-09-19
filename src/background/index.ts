@@ -6,6 +6,26 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
 })
 
+const LOCAL_MIRROR_URL = 'http://localhost:4300/api/threads'
+
+/**
+ * Best-effort mirror to the local web viewer (server/). chrome.storage.local
+ * on this device stays the source of truth for the extension itself — this
+ * just lets a browser tab at localhost:4300 read the same history. Silently
+ * no-ops if `npm run server` isn't running.
+ */
+async function pushToLocalMirror(thread: Thread): Promise<void> {
+  try {
+    await fetch(LOCAL_MIRROR_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(thread),
+    })
+  } catch {
+    // Mirror server not running — extension keeps working without it.
+  }
+}
+
 /**
  * Runs inside the page (via chrome.scripting.executeScript). Must be fully
  * self-contained — no imports, this function is serialized and injected as-is.
@@ -87,6 +107,7 @@ async function summarizeActiveTab(): Promise<Thread> {
   thread.title = page.title
 
   await upsertThread(thread)
+  await pushToLocalMirror(thread)
   return thread
 }
 
@@ -117,6 +138,7 @@ async function continueThread(threadId: string, userText: string): Promise<Threa
   thread.updatedAt = Date.now()
 
   await upsertThread(thread)
+  await pushToLocalMirror(thread)
   return thread
 }
 

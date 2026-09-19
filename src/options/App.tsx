@@ -20,7 +20,7 @@ export default function App() {
 
   return (
     <div>
-      <h1>Page Copilot — Settings</h1>
+      <h1>Vidur — Settings</h1>
 
       <div className="field">
         <label htmlFor="key">OpenRouter API key</label>
@@ -64,7 +64,7 @@ export default function App() {
           }
           placeholder={'one domain per line, e.g.\nbank.com\nhealth.example.com'}
         />
-        <p className="hint">Page Copilot only ever runs when you click it — this list is an extra opt-out for sensitive sites.</p>
+        <p className="hint">Vidur only ever runs when you click it — this list is an extra opt-out for sensitive sites.</p>
       </div>
 
       <button className="primary-btn" onClick={handleSave}>

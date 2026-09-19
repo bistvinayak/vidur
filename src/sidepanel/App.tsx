@@ -48,7 +48,7 @@ export default function App() {
     return (
       <div className="app">
         <header className="header">
-          <h1>Page Copilot</h1>
+          <h1>Vidur</h1>
           <button className="icon-btn" onClick={() => chrome.runtime.openOptionsPage()} title="Settings">
             ⚙
           </button>

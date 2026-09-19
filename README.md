@@ -1,4 +1,4 @@
-# Page Copilot
+# Vidur
 
 A browser extension that summarizes the page you're on, surfaces what's actually
 actionable, and suggests the next question — instead of just re-stating the page.
@@ -12,6 +12,7 @@ actionable, and suggests the next question — instead of just re-stating the pa
 - Output language setting (leave blank to match the source page)
 - Per-domain block list as an explicit opt-out
 - Runs on free OpenRouter models with automatic fallback chains — see `src/lib/openrouter.ts`
+- Every conversation is also mirrored to a **local web page** (`server/`) so it's browsable outside the side panel too — see "Local web viewer" below
 
 ## Not in v1 (see ROADMAP.md)
 
@@ -40,6 +41,32 @@ but deliberately deferred — see ROADMAP.md for why and in what order.
 For live-reloading during development, `npm run dev` works with `@crxjs/vite-plugin`'s
 HMR — reload the unpacked extension once after the first `npm run dev` start, then
 most changes hot-reload without re-loading it.
+
+## Local web viewer
+
+`chrome.storage.local` (what the side panel reads from) is sandboxed to the
+extension — a plain web page can't read it directly, even from `localhost`.
+So the extension separately mirrors every thread to a tiny local server, and
+a web page reads *that*:
+
+```
+npm run server
+```
+
+Then open **http://localhost:4300** in any regular tab — it lists every
+conversation and updates every 5s as new ones come in from the extension.
+
+- All data lives in `server/data/threads.json` — one plain folder on your
+  machine, gitignored, nothing leaves your computer. Delete it to wipe history.
+- The extension still works fully offline from this server — `chrome.storage.local`
+  stays the source of truth; the push to `localhost:4300` is fire-and-forget
+  and silently no-ops if the server isn't running.
+- This is a **read-only mirror** for now — replying to a thread still only
+  works from the side panel. Two-way sync (or moving storage entirely to the
+  server) is a natural next step once this is worth doing.
+- Because the extension fetches to `localhost:4300`, that's the one
+  `host_permissions` entry in the manifest — everything else stays scoped to
+  `activeTab`.
 
 ## Why activeTab instead of `<all_urls>`
 

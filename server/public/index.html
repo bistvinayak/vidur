@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vidur — History</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --border: #e5e7eb;
+    --accent: #2563eb; --bubble-assistant: #f3f4f6; --bubble-user: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16171a; --fg: #f2f2f2; --muted: #9ca3af; --border: #2b2d31; --bubble-assistant: #24262b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); }
+  .layout { display: flex; height: 100vh; }
+  .sidebar { width: 280px; border-right: 1px solid var(--border); overflow-y: auto; padding: 12px; flex-shrink: 0; }
+  .sidebar h1 { font-size: 16px; margin: 4px 4px 12px; }
+  .thread-item { display: block; width: 100%; text-align: left; background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; color: var(--fg); font: inherit; }
+  .thread-item.active { border-color: var(--accent); }
+  .thread-item .title { display: block; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thread-item .domain { display: block; font-size: 11px; color: var(--muted); }
+  .main { flex: 1; overflow-y: auto; padding: 24px; max-width: 720px; }
+  .main h2 { margin-top: 0; }
+  .main a.source-link { font-size: 12px; color: var(--muted); }
+  .bubble { border-radius: 10px; padding: 10px 14px; font-size: 14px; line-height: 1.5; max-width: 90%; margin-bottom: 12px; white-space: pre-wrap; }
+  .bubble.assistant { background: var(--bubble-assistant); }
+  .bubble.user { background: var(--bubble-user); color: #fff; margin-left: auto; }
+  .actionable-list { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
+  .empty { color: var(--muted); padding: 24px; }
+</style>
+</head>
+<body>
+  <div class="layout">
+    <div class="sidebar">
+      <h1>Vidur</h1>
+      <div id="thread-list">Loading…</div>
+    </div>
+    <div class="main" id="main">
+      <p class="empty">Select a conversation on the left.</p>
+    </div>
+  </div>
+
+<script>
+  let threads = []
+  let activeId = null
+
+  async function load() {
+    const res = await fetch('/api/threads')
+    threads = await res.json()
+    renderList()
+    if (threads.length && !activeId) selectThread(threads[0].id)
+  }
+
+  function renderList() {
+    const el = document.getElementById('thread-list')
+    if (!threads.length) {
+      el.innerHTML = '<p class="empty">No conversations yet — use the Vidur extension to summarize a page.</p>'
+      return
+    }
+    el.innerHTML = threads.map(t => `
+      <button class="thread-item ${t.id === activeId ? 'active' : ''}" data-id="${escapeAttr(t.id)}">
+        <span class="title">${escapeHtml(t.title || t.domain)}</span>
+        <span class="domain">${escapeHtml(t.domain)}</span>
+      </button>
+    `).join('')
+    el.querySelectorAll('.thread-item').forEach(btn => {
+      btn.addEventListener('click', () => selectThread(btn.dataset.id))
+    })
+  }
+
+  function selectThread(id) {
+    activeId = id
+    renderList()
+    const thread = threads.find(t => t.id === id)
+    const main = document.getElementById('main')
+    if (!thread) { main.innerHTML = '<p class="empty">Not found.</p>'; return }
+
+    main.innerHTML = `
+      <h2>${escapeHtml(thread.title || thread.domain)}</h2>
+      <a class="source-link" href="${escapeAttr(thread.url)}" target="_blank" rel="noopener">${escapeHtml(thread.url)}</a>
+      <div style="margin-top:16px">
+        ${thread.messages.map(renderMessage).join('')}
+      </div>
+    `
+  }
+
+  function renderMessage(m) {
+    const items = (m.actionableItems || []).length
+      ? `<ul class="actionable-list">${m.actionableItems.map(a => `<li><strong>${escapeHtml(a.label)}</strong>${a.detail ? ' — ' + escapeHtml(a.detail) : ''}</li>`).join('')}</ul>`
+      : ''
+    return `<div class="bubble ${m.role}">${escapeHtml(m.content)}${items}</div>`
+  }
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]))
+  }
+  function escapeAttr(s) { return escapeHtml(s) }
+
+  load()
+  setInterval(load, 5000) // picks up new summaries pushed from the extension without a manual refresh
+</script>
+</body>
+</html>

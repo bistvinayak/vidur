@@ -73,8 +73,8 @@ async function callOpenRouter(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       // Required by OpenRouter for attribution/rate-limit purposes.
-      'HTTP-Referer': 'https://github.com/page-copilot',
-      'X-Title': 'Page Copilot',
+      'HTTP-Referer': 'https://github.com/vidur-extension',
+      'X-Title': 'Vidur',
     },
     body: JSON.stringify({
       models,
