@@ -13,6 +13,7 @@ actionable, and suggests the next question — instead of just re-stating the pa
 - Per-domain block list as an explicit opt-out
 - Runs on free OpenRouter models with automatic fallback chains — see `src/lib/openrouter.ts`
 - Every conversation is also mirrored to a **local web page** (`server/`) so it's browsable outside the side panel too — see "Local web viewer" below
+- **Pick your own model provider** — OpenRouter (free), Claude, or GPT — from either the extension's Settings page or the web page's own settings, with a recommended default model per provider
 
 ## Not in v1 (see ROADMAP.md)
 
@@ -61,12 +62,36 @@ conversation and updates every 5s as new ones come in from the extension.
 - The extension still works fully offline from this server — `chrome.storage.local`
   stays the source of truth; the push to `localhost:4300` is fire-and-forget
   and silently no-ops if the server isn't running.
-- This is a **read-only mirror** for now — replying to a thread still only
-  works from the side panel. Two-way sync (or moving storage entirely to the
-  server) is a natural next step once this is worth doing.
-- Because the extension fetches to `localhost:4300`, that's the one
-  `host_permissions` entry in the manifest — everything else stays scoped to
-  `activeTab`.
+- **Two-way**: you can reply to a thread and change Settings (provider, model,
+  output language) directly from the web page. This works via
+  `externally_connectable` in the manifest — the web page calls
+  `chrome.runtime.sendMessage(EXTENSION_ID, ...)` straight to the background
+  script (the same code path the side panel uses), not a second copy of the
+  model-calling logic. The extension's ID is pinned via the `key` field in
+  `manifest.config.ts` so it stays stable across reloads — see the comment
+  there if you ever need to regenerate it.
+- API keys never round-trip back to the web page in plain text — `GET_SETTINGS`
+  redacts them to a `*Set: true/false` flag; the raw key only ever lives in
+  `chrome.storage.local`, read directly (not via messaging) by the extension's
+  own Settings page.
+- Because the extension fetches/messages `localhost:4300`, that's the one
+  `host_permissions` + `externally_connectable` entry in the manifest —
+  everything else stays scoped to `activeTab`.
+
+## Choosing a model provider
+
+Both the extension's Settings (gear icon in the side panel) and the web
+page's own Settings (gear icon top-left) let you pick:
+
+- **OpenRouter (free)** — the default. Pick a specific free model (Ling 3.0
+  Flash VL is recommended); the rest of the free roster is tried automatically
+  as fallback if it's down. See `src/lib/types.ts` for the full list.
+- **Claude (Anthropic)** or **GPT (OpenAI)** — bring your own paid API key.
+  Useful once free-tier quality/rate-limits stop being enough for real use.
+
+All three go through the same `ModelProvider` interface
+(`src/lib/providers/`), so `src/background/index.ts` doesn't know or care
+which one is active.
 
 ## Why activeTab instead of `<all_urls>`
 

@@ -1,10 +1,17 @@
+import { OPENROUTER_FREE_MODELS, ANTHROPIC_MODELS, OPENAI_MODELS } from './types'
 import type { Settings, Thread } from './types'
 
 const THREADS_KEY = 'threads'
 const SETTINGS_KEY = 'settings'
 
 const DEFAULT_SETTINGS: Settings = {
+  provider: 'openrouter',
   openrouterApiKey: '',
+  openrouterModel: OPENROUTER_FREE_MODELS.find((m) => m.recommended)!.id,
+  anthropicApiKey: '',
+  anthropicModel: ANTHROPIC_MODELS.find((m) => m.recommended)!.id,
+  openaiApiKey: '',
+  openaiModel: OPENAI_MODELS.find((m) => m.recommended)!.id,
   outputLanguage: '',
   blockedDomains: [],
 }

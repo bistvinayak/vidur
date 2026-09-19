@@ -1,12 +1,37 @@
-import { askFollowUp, summarizePage } from '../lib/openrouter'
-import { getSettings, getThread, threadIdForUrl, upsertThread } from '../lib/storage'
-import type { ChatMessage, ExtractedPage, Thread } from '../lib/types'
+import { getProvider } from '../lib/providers'
+import { getSettings, getThread, saveSettings, threadIdForUrl, upsertThread } from '../lib/storage'
+import type { ChatMessage, ExtractedPage, Settings, Thread } from '../lib/types'
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
 })
 
 const LOCAL_MIRROR_URL = 'http://localhost:4300/api/threads'
+const KEY_FIELDS = ['openrouterApiKey', 'anthropicApiKey', 'openaiApiKey'] as const
+
+/**
+ * Settings crossing to the web page (a page's own JS/devtools, not the
+ * extension's own trusted UI) never carry raw API keys — only whether one's
+ * set. The Settings page inside the extension still reads/writes the real
+ * keys directly via chrome.storage.local, unaffected by this.
+ */
+function redactKeys(settings: Settings) {
+  const redacted: any = { ...settings }
+  for (const field of KEY_FIELDS) {
+    redacted[`${field}Set`] = Boolean(settings[field])
+    redacted[field] = ''
+  }
+  return redacted
+}
+
+/** Blank/omitted key fields in an update mean "leave it as-is", not "clear it". */
+function mergeSettingsUpdate(current: Settings, incoming: Partial<Settings>): Settings {
+  const merged = { ...current, ...incoming }
+  for (const field of KEY_FIELDS) {
+    if (!incoming[field]) merged[field] = current[field]
+  }
+  return merged
+}
 
 /**
  * Best-effort mirror to the local web viewer (server/). chrome.storage.local
@@ -63,9 +88,7 @@ async function summarizeActiveTab(): Promise<Thread> {
   if (!tab?.id || !tab.url) throw new Error('No active tab.')
 
   const settings = await getSettings()
-  if (!settings.openrouterApiKey) {
-    throw new Error('Add your OpenRouter API key in Settings first.')
-  }
+  const provider = getProvider(settings) // throws a clear error if the selected provider's key is missing
 
   const domain = new URL(tab.url).hostname
   if (settings.blockedDomains.some((d) => domain.endsWith(d))) {
@@ -78,8 +101,7 @@ async function summarizeActiveTab(): Promise<Thread> {
   })
   if (!page) throw new Error('Could not read this page.')
 
-  const { summary, actionableItems, followUps } = await summarizePage(page, {
-    apiKey: settings.openrouterApiKey,
+  const { summary, actionableItems, followUps } = await provider.summarizePage(page, {
     outputLanguage: settings.outputLanguage,
   })
 
@@ -113,9 +135,7 @@ async function summarizeActiveTab(): Promise<Thread> {
 
 async function continueThread(threadId: string, userText: string): Promise<Thread> {
   const settings = await getSettings()
-  if (!settings.openrouterApiKey) {
-    throw new Error('Add your OpenRouter API key in Settings first.')
-  }
+  const provider = getProvider(settings)
 
   const thread = await getThread(threadId)
   if (!thread) throw new Error('Thread not found.')
@@ -123,8 +143,7 @@ async function continueThread(threadId: string, userText: string): Promise<Threa
   const userMessage: ChatMessage = { role: 'user', content: userText, createdAt: Date.now() }
   thread.messages.push(userMessage)
 
-  const { summary, actionableItems, followUps } = await askFollowUp(thread.messages, userText, {
-    apiKey: settings.openrouterApiKey,
+  const { summary, actionableItems, followUps } = await provider.askFollowUp(thread.messages, userText, {
     outputLanguage: settings.outputLanguage,
   })
 
@@ -141,6 +160,38 @@ async function continueThread(threadId: string, userText: string): Promise<Threa
   await pushToLocalMirror(thread)
   return thread
 }
+
+// Messages from the local web viewer (server/public/index.html), not from
+// the extension's own UI. externally_connectable in the manifest already
+// restricts which origins can reach this at all, but checking sender.origin
+// here too is cheap insurance against any manifest misconfiguration.
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (sender.origin !== 'http://localhost:4300') return false
+
+  if (message?.type === 'CONTINUE_THREAD') {
+    continueThread(message.threadId, message.text)
+      .then((thread) => sendResponse({ ok: true, thread }))
+      .catch((err) => sendResponse({ ok: false, error: String(err.message ?? err) }))
+    return true
+  }
+
+  if (message?.type === 'GET_SETTINGS') {
+    getSettings()
+      .then((settings) => sendResponse({ ok: true, settings: redactKeys(settings) }))
+      .catch((err) => sendResponse({ ok: false, error: String(err.message ?? err) }))
+    return true
+  }
+
+  if (message?.type === 'SAVE_SETTINGS') {
+    getSettings()
+      .then((current) => saveSettings(mergeSettingsUpdate(current, message.settings)))
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err.message ?? err) }))
+    return true
+  }
+
+  return false
+})
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'SUMMARIZE_ACTIVE_TAB') {

@@ -30,28 +30,106 @@
   .bubble.user { background: var(--bubble-user); color: #fff; margin-left: auto; }
   .actionable-list { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
   .empty { color: var(--muted); padding: 24px; }
+  .composer { display: flex; gap: 8px; margin-top: 16px; }
+  .composer input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 14px; background: var(--bg); color: var(--fg); }
+  .composer button { border: none; border-radius: 8px; background: var(--accent); color: #fff; padding: 8px 14px; font-size: 14px; cursor: pointer; }
+  .composer button:disabled { opacity: 0.5; cursor: default; }
+  .composer-error { color: #dc2626; font-size: 12px; margin: 6px 0 0; }
+  .bubble.thinking { color: var(--muted); font-style: italic; }
+  .sidebar-header { display: flex; align-items: center; justify-content: space-between; margin: 4px 4px 12px; }
+  .sidebar-header h1 { font-size: 16px; margin: 0; }
+  .icon-btn { background: none; border: none; font-size: 16px; cursor: pointer; color: var(--fg); padding: 2px 4px; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .modal { background: var(--bg); color: var(--fg); border-radius: 12px; padding: 20px; width: 360px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+  .modal h2 { margin-top: 0; font-size: 15px; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+  .field label { font-size: 12px; font-weight: 600; }
+  .field .hint { font-size: 11px; color: var(--muted); margin: 0; }
+  .field input, .field select { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 13px; background: var(--bg); color: var(--fg); font-family: inherit; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  .modal-actions button { border: none; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  .modal-actions .save-btn { background: var(--accent); color: #fff; }
+  .modal-actions .cancel-btn { background: var(--bubble-assistant); color: var(--fg); }
 </style>
 </head>
 <body>
   <div class="layout">
     <div class="sidebar">
-      <h1>Vidur</h1>
+      <div class="sidebar-header">
+        <h1>Vidur</h1>
+        <button class="icon-btn" id="settings-btn" title="Settings">⚙</button>
+      </div>
       <div id="thread-list">Loading…</div>
     </div>
     <div class="main" id="main">
       <p class="empty">Select a conversation on the left.</p>
     </div>
   </div>
+  <div id="settings-root"></div>
 
 <script>
+  // The extension's ID is pinned via the "key" field in manifest.config.ts,
+  // so this stays correct even if the extension is reloaded from a
+  // different path — update this only if you ever regenerate that key.
+  const EXTENSION_ID = 'cojjeeofpghidendcnemfpppjmcgbnah'
+
+  // Kept in sync by hand with src/lib/types.ts — this plain page has no
+  // build step to import them from, so if that file's model lists change,
+  // update these too.
+  const PROVIDERS = {
+    openrouter: {
+      label: 'OpenRouter (free)',
+      keyField: 'openrouterApiKey',
+      modelField: 'openrouterModel',
+      keyPlaceholder: 'sk-or-v1-…',
+      keyHint: 'Free account at openrouter.ai/keys.',
+      models: [
+        { id: 'inclusionai/ling-3.0-flash-vl:free', label: 'Ling 3.0 Flash VL — Recommended' },
+        { id: 'nex-agi/nex-n2.5-pro:free', label: 'Nex N2.5 Pro' },
+        { id: 'nex-agi/nex-n2.5-mini:free', label: 'Nex N2.5 Mini' },
+        { id: 'thinkingmachines/inkling:free', label: 'Inkling (huge context, no tool calling)' },
+        { id: 'cohere/north-mini-code:free', label: 'North Mini Code (no vision)' },
+      ],
+    },
+    anthropic: {
+      label: 'Claude (Anthropic, paid)',
+      keyField: 'anthropicApiKey',
+      modelField: 'anthropicModel',
+      keyPlaceholder: 'sk-ant-…',
+      keyHint: 'Your own Anthropic API key — usage is billed to your account.',
+      models: [
+        { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (fastest/cheapest)' },
+        { id: 'claude-sonnet-5', label: 'Claude Sonnet 5 — Recommended' },
+        { id: 'claude-opus-5', label: 'Claude Opus 5 (most capable)' },
+      ],
+    },
+    openai: {
+      label: 'GPT (OpenAI, paid)',
+      keyField: 'openaiApiKey',
+      modelField: 'openaiModel',
+      keyPlaceholder: 'sk-…',
+      keyHint: 'Your own OpenAI API key — usage is billed to your account.',
+      models: [
+        { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna — Recommended' },
+        { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol (flagship)' },
+        { id: 'gpt-6-astra', label: 'GPT-6 Astra (most capable)' },
+      ],
+    },
+  }
+
   let threads = []
   let activeId = null
+  let sending = false
 
   async function load() {
     const res = await fetch('/api/threads')
     threads = await res.json()
-    renderList()
-    if (threads.length && !activeId) selectThread(threads[0].id)
+    if (activeId) {
+      selectThread(activeId) // refresh with any new messages (e.g. after sendReply)
+    } else {
+      renderList()
+      if (threads.length) selectThread(threads[0].id)
+    }
   }
 
   function renderList() {
@@ -83,8 +161,53 @@
       <a class="source-link" href="${escapeAttr(thread.url)}" target="_blank" rel="noopener">${escapeHtml(thread.url)}</a>
       <div style="margin-top:16px">
         ${thread.messages.map(renderMessage).join('')}
+        ${sending ? '<div class="bubble assistant thinking">Thinking…</div>' : ''}
       </div>
+      <form class="composer" id="composer">
+        <input id="composer-input" placeholder="Ask a follow-up…" ${sending ? 'disabled' : ''} autocomplete="off" />
+        <button type="submit" ${sending ? 'disabled' : ''}>Send</button>
+      </form>
+      <p class="composer-error" id="composer-error" hidden></p>
     `
+    document.getElementById('composer').addEventListener('submit', (e) => {
+      e.preventDefault()
+      const input = document.getElementById('composer-input')
+      const text = input.value.trim()
+      if (text) sendReply(thread.id, text)
+    })
+  }
+
+  function sendReply(threadId, text) {
+    const errorEl = document.getElementById('composer-error')
+    errorEl.hidden = true
+
+    if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+      errorEl.textContent = 'Cannot reach the Vidur extension from this browser/tab. Reply from the extension\'s side panel instead.'
+      errorEl.hidden = false
+      return
+    }
+
+    sending = true
+    selectThread(threadId) // re-render with composer disabled + "Thinking…"
+
+    chrome.runtime.sendMessage(EXTENSION_ID, { type: 'CONTINUE_THREAD', threadId, text }, (response) => {
+      sending = false
+      if (chrome.runtime.lastError || !response) {
+        const el = document.getElementById('composer-error')
+        if (el) {
+          el.textContent = 'Could not reach the extension — is it installed and enabled? (' +
+            (chrome.runtime.lastError ? chrome.runtime.lastError.message : 'no response') + ')'
+          el.hidden = false
+        }
+        return
+      }
+      if (!response.ok) {
+        const el = document.getElementById('composer-error')
+        if (el) { el.textContent = response.error; el.hidden = false }
+        return
+      }
+      load() // pulls the persisted thread (with the new reply) back from the server
+    })
   }
 
   function renderMessage(m) {
@@ -98,6 +221,113 @@
     return (s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]))
   }
   function escapeAttr(s) { return escapeHtml(s) }
+
+  function callExtension(message) {
+    return new Promise((resolve, reject) => {
+      if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+        reject(new Error('Cannot reach the Vidur extension from this browser/tab.'))
+        return
+      }
+      chrome.runtime.sendMessage(EXTENSION_ID, message, (response) => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message))
+        if (!response) return reject(new Error('No response from the extension.'))
+        if (!response.ok) return reject(new Error(response.error))
+        resolve(response)
+      })
+    })
+  }
+
+  async function openSettings() {
+    const root = document.getElementById('settings-root')
+    root.innerHTML = '<div class="modal-backdrop"><div class="modal"><p>Loading settings…</p></div></div>'
+
+    let settings
+    try {
+      ;({ settings } = await callExtension({ type: 'GET_SETTINGS' }))
+    } catch (err) {
+      root.innerHTML = `<div class="modal-backdrop"><div class="modal"><p class="composer-error" style="display:block">${escapeHtml(err.message)}</p><div class="modal-actions"><button class="cancel-btn" id="settings-close">Close</button></div></div></div>`
+      document.getElementById('settings-close').addEventListener('click', () => { root.innerHTML = '' })
+      return
+    }
+
+    renderSettingsForm(settings)
+  }
+
+  function renderSettingsForm(settings) {
+    const root = document.getElementById('settings-root')
+    const provider = PROVIDERS[settings.provider] || PROVIDERS.openrouter
+
+    root.innerHTML = `
+      <div class="modal-backdrop">
+        <div class="modal">
+          <h2>Vidur — Settings</h2>
+          <div class="field">
+            <label>Model provider</label>
+            <select id="s-provider">
+              ${Object.keys(PROVIDERS).map(key => `<option value="${key}" ${key === settings.provider ? 'selected' : ''}>${PROVIDERS[key].label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" id="s-model-field">
+            <label>Model</label>
+            <select id="s-model">
+              ${provider.models.map(m => `<option value="${m.id}" ${m.id === settings[provider.modelField] ? 'selected' : ''}>${m.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" id="s-key-field">
+            <label id="s-key-label"></label>
+            <input id="s-key" type="password" placeholder="" />
+            <p class="hint" id="s-key-hint"></p>
+          </div>
+          <div class="field">
+            <label>Output language</label>
+            <input id="s-lang" value="${escapeAttr(settings.outputLanguage || '')}" placeholder="Leave blank to match the page's language" />
+          </div>
+          <p class="composer-error" id="s-error" hidden></p>
+          <div class="modal-actions">
+            <button class="cancel-btn" id="settings-cancel">Cancel</button>
+            <button class="save-btn" id="settings-save">Save</button>
+          </div>
+        </div>
+      </div>
+    `
+
+    function refreshProviderFields(providerKey) {
+      const p = PROVIDERS[providerKey]
+      document.getElementById('s-model').innerHTML = p.models.map(m =>
+        `<option value="${m.id}" ${m.id === settings[p.modelField] ? 'selected' : ''}>${m.label}</option>`
+      ).join('')
+      document.getElementById('s-key-label').textContent = p.label + ' API key'
+      document.getElementById('s-key-hint').textContent = p.keyHint + ' Stored only in the extension (chrome.storage.local).'
+      document.getElementById('s-key').placeholder = settings[p.keyField + 'Set'] ? 'Already set — leave blank to keep it' : p.keyPlaceholder
+    }
+    refreshProviderFields(settings.provider)
+
+    document.getElementById('s-provider').addEventListener('change', (e) => refreshProviderFields(e.target.value))
+    document.getElementById('settings-cancel').addEventListener('click', () => { root.innerHTML = '' })
+
+    document.getElementById('settings-save').addEventListener('click', async () => {
+      const providerKey = document.getElementById('s-provider').value
+      const p = PROVIDERS[providerKey]
+      const update = {
+        provider: providerKey,
+        outputLanguage: document.getElementById('s-lang').value.trim(),
+        [p.modelField]: document.getElementById('s-model').value,
+      }
+      const keyValue = document.getElementById('s-key').value.trim()
+      if (keyValue) update[p.keyField] = keyValue // blank = leave existing key untouched
+
+      try {
+        await callExtension({ type: 'SAVE_SETTINGS', settings: update })
+        root.innerHTML = ''
+      } catch (err) {
+        const el = document.getElementById('s-error')
+        el.textContent = err.message
+        el.hidden = false
+      }
+    })
+  }
+
+  document.getElementById('settings-btn').addEventListener('click', openSettings)
 
   load()
   setInterval(load, 5000) // picks up new summaries pushed from the extension without a manual refresh
