@@ -11,7 +11,14 @@ const DEFAULT_SETTINGS: Settings = {
 
 export async function getSettings(): Promise<Settings> {
   const result = await chrome.storage.local.get<{ settings?: Settings }>(SETTINGS_KEY)
-  return { ...DEFAULT_SETTINGS, ...result.settings }
+  const merged = { ...DEFAULT_SETTINGS, ...result.settings }
+  // Dev convenience only: if nothing's been saved via the Settings page yet,
+  // fall back to the key in .env (npm run dev). A production build has no
+  // .env baked in, so this is a no-op outside local development.
+  if (!merged.openrouterApiKey && import.meta.env.VITE_OPENROUTER_API_KEY) {
+    merged.openrouterApiKey = import.meta.env.VITE_OPENROUTER_API_KEY
+  }
+  return merged
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
