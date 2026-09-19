@@ -2,6 +2,17 @@ import { getProvider } from '../lib/providers'
 import { getSettings, getThread, saveSettings, threadIdForUrl, upsertThread } from '../lib/storage'
 import type { ChatMessage, ExtractedPage, Settings, Thread } from '../lib/types'
 
+// Explicitly false, not just omitted: Chrome persists this setting against
+// the extension's ID (not in the extension's own storage), and an earlier
+// version of this code set it to true. Since the ID is pinned (see
+// manifest.config.ts), removing/reloading the unpacked extension does NOT
+// reset it on its own — without this explicit override, chrome.action.onClicked
+// below would silently never fire, because Chrome would still be consuming
+// the click to just open the panel, per the old setting.
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {})
+})
+
 const LOCAL_MIRROR_URL = 'http://localhost:4300/api/threads'
 const KEY_FIELDS = ['openrouterApiKey', 'anthropicApiKey', 'openaiApiKey'] as const
 
