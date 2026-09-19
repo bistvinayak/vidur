@@ -5,7 +5,7 @@ actionable, and suggests the next question — instead of just re-stating the pa
 
 ## What's in v1
 
-- Click the toolbar icon → side panel opens → **Summarize this page**
+- Click the Vidur toolbar icon on any page — that both opens the side panel and summarizes the page you were on. (This has to be the trigger, not a button inside an already-open panel — see "Why the toolbar icon, not a button" below.)
 - Reads page text + up to 5 relevant images (filtered for size/position, not every icon on the page)
 - Structured output: summary, actionable items (deadlines, prices, red flags…), and up to 3 follow-up chips tailored to what was actually found
 - Each page gets its own conversation thread (by URL), browsable in History, with follow-up chat
@@ -36,8 +36,30 @@ but deliberately deferred — see ROADMAP.md for why and in what order.
    - Go to `chrome://extensions`
    - Enable **Developer mode** (top right)
    - Click **Load unpacked** → select the `dist/` folder
-5. Click the extension icon on any page, then open **Settings** (gear icon) and paste in your OpenRouter API key.
-6. Click the extension icon again → **Summarize this page**.
+5. Click the Vidur icon once (panel opens, and it'll try to summarize whatever
+   page you're on — this'll fail with "add your API key" the first time,
+   that's expected). Open **Settings** (gear icon) and paste in your key.
+6. Click the Vidur icon again on the page you want summarized.
+
+## Why the toolbar icon, not a button inside the panel
+
+The first version of this had a "Summarize this page" button inside the
+side panel, which seemed natural but doesn't actually work reliably: Chrome's
+`activeTab` permission is granted to *the specific tab that was active at the
+exact moment you click the toolbar icon* — not to "whatever tab you're
+currently looking at." Side panels are designed to stay open while you
+switch tabs, so if you open the panel on tab A and then switch to tab B, a
+button click inside the panel still only has permission for tab A, not B —
+Chrome doesn't consider a click inside already-open extension UI a fresh
+"invoke the extension" gesture. That's confirmed in
+[Chrome's own activeTab docs](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab).
+
+So the toolbar icon click is the one truly reliable trigger, and it now
+does the summarizing directly (`chrome.action.onClicked` in
+`src/background/index.ts`) rather than just opening the panel for a button
+inside it to act later. The panel's own button still exists as a manual
+re-run — it works as long as you haven't switched tabs since the last icon
+click — but the icon is the trigger to reach for by default.
 
 For live-reloading during development, `npm run dev` works with `@crxjs/vite-plugin`'s
 HMR — reload the unpacked extension once after the first `npm run dev` start, then

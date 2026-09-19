@@ -9,6 +9,7 @@ export default function App() {
   const [view, setView] = useState<View>({ name: 'list' })
   const [activeTabUrl, setActiveTabUrl] = useState<string | undefined>()
   const [busy, setBusy] = useState(false)
+  const [autoSummarizing, setAutoSummarizing] = useState(false)
   const [error, setError] = useState<string | undefined>()
   const [draft, setDraft] = useState('')
 
@@ -17,6 +18,19 @@ export default function App() {
   useEffect(() => {
     refreshThreads()
     chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => setActiveTabUrl(tab?.url))
+    chrome.storage.local.get('inFlightTabId').then((r) => setAutoSummarizing(Boolean(r.inFlightTabId)))
+
+    // The actual "Summarize this page" trigger is now the toolbar icon click
+    // (see background/index.ts) — it can complete before this panel has even
+    // finished mounting, or while it's already open on a different view, so
+    // this is how the panel finds out rather than a direct response to a click.
+    function handleStorageChange(changes: Record<string, chrome.storage.StorageChange>, area: string) {
+      if (area !== 'local') return
+      if ('inFlightTabId' in changes) setAutoSummarizing(Boolean(changes.inFlightTabId.newValue))
+      if ('threads' in changes) refreshThreads()
+    }
+    chrome.storage.onChanged.addListener(handleStorageChange)
+    return () => chrome.storage.onChanged.removeListener(handleStorageChange)
   }, [])
 
   const activeThread = view.name === 'thread' ? threads.find((t) => t.id === view.threadId) : undefined
@@ -69,10 +83,12 @@ export default function App() {
         <button className="primary-btn" onClick={handleSummarize} disabled={busy}>
           {busy ? 'Reading page…' : currentPageThread ? 'Summarize again' : 'Summarize this page'}
         </button>
+        <p className="hint">Or just click the Vidur toolbar icon on any page — that's the more reliable trigger.</p>
+        {autoSummarizing && <p className="empty">Summarizing the page you clicked the icon on…</p>}
         {error && <p className="error">{error}</p>}
 
         <h2 className="section-title">History</h2>
-        {threads.length === 0 && <p className="empty">No summaries yet — click the button above on any page.</p>}
+        {threads.length === 0 && !autoSummarizing && <p className="empty">No summaries yet — click the Vidur icon on any page.</p>}
         <ul className="thread-list">
           {threads.map((t) => (
             <li key={t.id}>

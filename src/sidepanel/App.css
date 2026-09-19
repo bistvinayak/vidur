@@ -78,6 +78,8 @@ body {
 
 .primary-btn:disabled { opacity: 0.6; cursor: default; }
 
+.hint { font-size: 11px; color: var(--muted); margin: 0; }
+
 .section-title {
   font-size: 12px;
   text-transform: uppercase;

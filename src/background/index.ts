@@ -2,10 +2,6 @@ import { getProvider } from '../lib/providers'
 import { getSettings, getThread, saveSettings, threadIdForUrl, upsertThread } from '../lib/storage'
 import type { ChatMessage, ExtractedPage, Settings, Thread } from '../lib/types'
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
-})
-
 const LOCAL_MIRROR_URL = 'http://localhost:4300/api/threads'
 const KEY_FIELDS = ['openrouterApiKey', 'anthropicApiKey', 'openaiApiKey'] as const
 
@@ -83,12 +79,13 @@ function extractPageContent(): ExtractedPage {
   }
 }
 
-async function summarizeActiveTab(tabId: number): Promise<Thread> {
-  // tabId is resolved by the side panel itself (window-scoped, reliable) and
-  // passed in — chrome.tabs.query({currentWindow: true}) run from here in
-  // the background service worker has no window of its own to be "current"
-  // against, and can silently resolve to the wrong window or none at all.
-  const tab = await chrome.tabs.get(tabId)
+/**
+ * Does the actual work, given a Tab that's guaranteed to have activeTab
+ * access — either because it's the exact tab object chrome.action.onClicked
+ * just handed us (the click itself is the grant), or because a caller
+ * already confirmed the grant is still fresh for that tabId.
+ */
+async function runSummarize(tab: chrome.tabs.Tab): Promise<Thread> {
   if (!tab?.id || !tab.url) throw new Error('Could not read that tab — try again from a normal web page.')
 
   const settings = await getSettings()
@@ -136,6 +133,40 @@ async function summarizeActiveTab(tabId: number): Promise<Thread> {
   await pushToLocalMirror(thread)
   return thread
 }
+
+/** Used by the panel's own "Summarize this page" button — works as long as
+ * activeTab is still valid for this tab (i.e. it's the tab that was active
+ * the last time the toolbar icon was clicked, and hasn't navigated since). */
+async function summarizeActiveTab(tabId: number): Promise<Thread> {
+  const tab = await chrome.tabs.get(tabId)
+  return runSummarize(tab)
+}
+
+const IN_FLIGHT_KEY = 'inFlightTabId'
+
+// The one fully reliable trigger: activeTab access is granted to whichever
+// tab was active at the exact moment of this click — not to "whatever tab
+// the user is currently looking at" if they've since switched away from the
+// tab that was active when the panel was first opened. So this, not a
+// button inside an already-open panel, is what actually runs the summary.
+chrome.action.onClicked.addListener(async (tab) => {
+  if (tab.windowId != null) {
+    // Not awaited on purpose — chrome.sidePanel.open must run as close to
+    // the synchronous click handler as possible to still count as a user
+    // gesture; awaiting something first can lose that.
+    chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {})
+  }
+  if (!tab.id || !tab.url) return // e.g. a chrome:// page — nothing to summarize
+
+  try {
+    await chrome.storage.local.set({ [IN_FLIGHT_KEY]: tab.id })
+    await runSummarize(tab)
+  } catch (err) {
+    console.error('Vidur: summarize on icon click failed:', err)
+  } finally {
+    await chrome.storage.local.remove(IN_FLIGHT_KEY)
+  }
+})
 
 async function continueThread(threadId: string, userText: string): Promise<Thread> {
   const settings = await getSettings()
