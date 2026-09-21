@@ -17,6 +17,19 @@ not just being a wishlist.
   This is also the reusable building block v5's accessibility variant needs.
 - **Copy/share**: per-message and whole-conversation copy, on both the side
   panel and the web page.
+- **PDF support and iframe-aware extraction**: a `.pdf` tab gets parsed via
+  `pdfjs-dist` (workerless, dynamically imported so it doesn't bloat every
+  service worker cold start); DOM extraction now scans all frames, not just
+  the top one, for sites that embed the actual document in an iframe.
+- **First slice of v3's action execution** — see "Action execution" in
+  README.md for the full mechanics. This is the real, general computer-use
+  path (screenshot → vision-grounded coordinates → `chrome.debugger` click),
+  a deliberate departure from the DOM-selector approach originally planned
+  here, chosen explicitly over the cheaper/safer alternative after weighing
+  the tradeoff. What v3 below still describes and this doesn't yet have:
+  tiering by consequence (every action currently confirms, regardless of
+  how reversible it is), a per-site action whitelist, typing into fields
+  (click-only so far), and an activity log/undo.
 
 ## v2 — Connectors + real price search
 - **Gmail connector via MCP**: draft-only by default, user reviews/sends —
@@ -29,7 +42,9 @@ not just being a wishlist.
   so a real browsing agent can drop in later without touching the UI.
 
 ## v3 — Actions, not just suggestions
-- Turn follow-up chips into real actions, tiered by consequence:
+(A first slice of this shipped already — see above and README.md's "Action
+execution" section. What's below is what's still missing from it.)
+- Tier actions by consequence — today every action confirms regardless:
   - **Tier 1 (auto)**: read-only — search, filter, fetch more content
   - **Tier 2 (auto, but shown)**: reversible — fill a field, navigate, sort reviews
   - **Tier 3 (always confirm first)**: add to cart, submit a form, send email

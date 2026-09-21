@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import type { LocateActionResponse } from '../lib/actions'
 import { getAllThreads, threadIdForUrl } from '../lib/storage'
 import type { ChatMessage, Thread } from '../lib/types'
+
+type PendingAction = { x: number; y: number; xFraction: number; yFraction: number; description: string; screenshotDataUrl: string }
 
 type View = { name: 'list' } | { name: 'thread'; threadId: string }
 
@@ -51,6 +54,68 @@ export default function App() {
   const [copiedKey, setCopiedKey] = useState<string | undefined>()
   const [speakingKey, setSpeakingKey] = useState<string | undefined>()
   const [listening, setListening] = useState(false)
+  const [actionInstruction, setActionInstruction] = useState('')
+  const [actionBusy, setActionBusy] = useState(false)
+  const [pendingAction, setPendingAction] = useState<PendingAction | undefined>()
+  const [actionError, setActionError] = useState<string | undefined>()
+
+  async function handleLocateAction() {
+    if (!actionInstruction.trim()) return
+    setActionBusy(true)
+    setActionError(undefined)
+    setPendingAction(undefined)
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab?.id) {
+      setActionBusy(false)
+      return setActionError('Could not find the active tab — click on the page first.')
+    }
+
+    try {
+      const res: LocateActionResponse = await chrome.runtime.sendMessage({
+        type: 'LOCATE_ACTION_TARGET',
+        tabId: tab.id,
+        instruction: actionInstruction,
+      })
+      if (!res.ok) return setActionError(res.error)
+      if (!res.found) return setActionError("Couldn't find anything matching that on the visible part of the page.")
+      setPendingAction({
+        x: res.x!,
+        y: res.y!,
+        xFraction: res.xFraction!,
+        yFraction: res.yFraction!,
+        description: res.description || actionInstruction,
+        screenshotDataUrl: res.screenshotDataUrl!,
+      })
+    } catch (err) {
+      setActionError('Lost connection to the extension — try again. (' + String((err as Error)?.message ?? err) + ')')
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  async function handleConfirmAction() {
+    if (!pendingAction) return
+    setActionBusy(true)
+    setActionError(undefined)
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab?.id) {
+      setActionBusy(false)
+      return setActionError('Could not find the active tab.')
+    }
+
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'CONFIRM_ACTION_CLICK', tabId: tab.id, x: pendingAction.x, y: pendingAction.y })
+      if (!res.ok) return setActionError(res.error)
+      setPendingAction(undefined)
+      setActionInstruction('')
+    } catch (err) {
+      setActionError('Lost connection to the extension — try again. (' + String((err as Error)?.message ?? err) + ')')
+    } finally {
+      setActionBusy(false)
+    }
+  }
 
   function handleCopy(key: string, text: string) {
     copyToClipboard(text).then((ok) => {
@@ -184,6 +249,52 @@ export default function App() {
         <p className="hint">Or just click the Vidur toolbar icon on any page — that's the more reliable trigger.</p>
         {autoSummarizing && <p className="empty">Summarizing the page you clicked the icon on…</p>}
         {error && <p className="error">{error}</p>}
+
+        <h2 className="section-title">Take an action</h2>
+        {!pendingAction ? (
+          <>
+            <form
+              className="composer"
+              onSubmit={(e) => {
+                e.preventDefault()
+                handleLocateAction()
+              }}
+            >
+              <input
+                value={actionInstruction}
+                onChange={(e) => setActionInstruction(e.target.value)}
+                placeholder="e.g. click the Add to Cart button"
+                disabled={actionBusy}
+              />
+              <button type="submit" disabled={actionBusy || !actionInstruction.trim()}>
+                {actionBusy ? 'Looking…' : 'Locate'}
+              </button>
+            </form>
+            <p className="hint">
+              Takes a screenshot, finds the element, and shows you exactly where it'll click before anything happens.
+            </p>
+          </>
+        ) : (
+          <div className="action-confirm">
+            <div className="action-preview">
+              <img src={pendingAction.screenshotDataUrl} alt="Page preview" />
+              <div
+                className="action-marker"
+                style={{ left: `${pendingAction.xFraction * 100}%`, top: `${pendingAction.yFraction * 100}%` }}
+              />
+            </div>
+            <p className="hint">Found: {pendingAction.description}</p>
+            <div className="action-confirm-buttons">
+              <button className="cancel-btn" onClick={() => setPendingAction(undefined)} disabled={actionBusy}>
+                Cancel
+              </button>
+              <button className="save-btn" onClick={handleConfirmAction} disabled={actionBusy}>
+                {actionBusy ? 'Clicking…' : 'Click it'}
+              </button>
+            </div>
+          </div>
+        )}
+        {actionError && <p className="error">{actionError}</p>}
 
         <h2 className="section-title">History</h2>
         {threads.length === 0 && !autoSummarizing && <p className="empty">No summaries yet — click the Vidur icon on any page.</p>}

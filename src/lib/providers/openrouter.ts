@@ -3,10 +3,13 @@ import type { ChatMessage, ExtractedPage } from '../types'
 import {
   buildPageIntro,
   fetchWithTimeout,
+  LOCATE_TARGET_SCHEMA,
   languageInstruction,
   parseFindingsArgs,
+  parseLocateResult,
   REPORT_FINDINGS_SCHEMA,
   sanitizeSummaryText,
+  type LocateResult,
   type ModelProvider,
   type ProviderCallOpts,
   type ProviderResult,
@@ -21,6 +24,15 @@ const REPORT_FINDINGS_TOOL = {
   },
 }
 
+const LOCATE_TARGET_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'locate_target',
+    description: 'Identify the pixel location (as fractions of image size) of the UI element the instruction refers to.',
+    parameters: LOCATE_TARGET_SCHEMA,
+  },
+}
+
 /**
  * Preferred model first, then up to 2 more of the free roster as fallback —
  * OpenRouter's `models` array rejects requests with a 400 if given more
@@ -32,7 +44,14 @@ function buildChain(preferredModel: string): string[] {
   return [preferredModel, ...rest].slice(0, 3)
 }
 
-async function callOpenRouter(apiKey: string, models: string[], messages: unknown[], maxTokens: number): Promise<ProviderResult> {
+/** Shared request/response handling; callers parse the tool-call args their own way. */
+async function callTool(
+  apiKey: string,
+  models: string[],
+  messages: unknown[],
+  maxTokens: number,
+  tool: { type: 'function'; function: { name: string; description: string; parameters: unknown } },
+): Promise<{ args: any } | { rawContent: string }> {
   const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -44,9 +63,9 @@ async function callOpenRouter(apiKey: string, models: string[], messages: unknow
     body: JSON.stringify({
       models,
       messages,
-      max_tokens: maxTokens, // lower cap = lower worst-case latency, not just a safety net
-      tools: [REPORT_FINDINGS_TOOL],
-      tool_choice: { type: 'function', function: { name: 'report_findings' } },
+      max_tokens: maxTokens,
+      tools: [tool],
+      tool_choice: { type: 'function', function: { name: tool.function.name } },
     }),
   })
 
@@ -58,21 +77,26 @@ async function callOpenRouter(apiKey: string, models: string[], messages: unknow
   const data = await res.json()
   const toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
   if (!toolCall) {
+    return { rawContent: data.choices?.[0]?.message?.content ?? '' }
+  }
+  try {
+    return { args: JSON.parse(toolCall.function.arguments) }
+  } catch {
+    throw new Error('The model returned a malformed response — try again, or switch models in Settings.')
+  }
+}
+
+async function callOpenRouter(apiKey: string, models: string[], messages: unknown[], maxTokens: number): Promise<ProviderResult> {
+  const result = await callTool(apiKey, models, messages, maxTokens, REPORT_FINDINGS_TOOL)
+  if ('rawContent' in result) {
     // Model ignored tool_choice (happens on some free models, e.g. Inkling
     // which has no tool calling, or a reasoning model that emitted its own
     // <think>/<tool_call> text instead of a real structured call) — sanitize
     // before treating raw text as the summary, since it can otherwise carry
     // leaked chat-template artifacts straight into the UI.
-    return { summary: sanitizeSummaryText(data.choices?.[0]?.message?.content ?? ''), actionableItems: [], followUps: [] }
+    return { summary: sanitizeSummaryText(result.rawContent), actionableItems: [], followUps: [] }
   }
-
-  let args: any
-  try {
-    args = JSON.parse(toolCall.function.arguments)
-  } catch {
-    throw new Error('The model returned a malformed response — try again, or switch models in Settings.')
-  }
-  return parseFindingsArgs(args)
+  return parseFindingsArgs(result.args)
 }
 
 export function createOpenRouterProvider(apiKey: string, preferredModel: string): ModelProvider {
@@ -98,6 +122,16 @@ export function createOpenRouterProvider(apiKey: string, preferredModel: string)
       // A conversational reply needs far less room than a full page
       // summary + actionable items — smaller cap, faster worst case.
       return callOpenRouter(apiKey, chain, messages, 700)
+    },
+
+    async locateElement(screenshotDataUrl: string, instruction: string): Promise<LocateResult> {
+      const content = [
+        { type: 'text', text: `Find this in the screenshot: "${instruction}". Report its location as fractions of the image's width/height.` },
+        { type: 'image_url', image_url: { url: screenshotDataUrl } },
+      ]
+      const result = await callTool(apiKey, chain, [{ role: 'user', content }], 300, LOCATE_TARGET_TOOL)
+      if ('rawContent' in result) return { found: false, xFraction: 0, yFraction: 0, description: '' }
+      return parseLocateResult(result.args)
     },
   }
 }

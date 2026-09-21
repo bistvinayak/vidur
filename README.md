@@ -19,6 +19,7 @@ actionable, and suggests the next question — instead of just re-stating the pa
 - **Copy/share** — copy any message or the whole conversation as plain text, on both the side panel and the web page
 - **PDF support** — a `.pdf` tab gets its text extracted (via `pdfjs-dist`, workerless) and summarized the same way as any other page. See "PDF support" below for how this works and its one real limitation.
 - **Reads content inside iframes**, not just the top frame — needed for sites (reading/annotation tools especially) that embed the actual document in a sub-frame
+- **Take an action** — type an instruction ("click the Add to Cart button"), Vidur screenshots the page, a vision model locates it, and you see exactly where it'll click — with a screenshot preview and marker — before confirming. Real click, not a suggestion: see "Action execution" below for how this works and why it needs a new, more sensitive permission than everything else here.
 
 ## Not in v1 (see ROADMAP.md)
 
@@ -148,6 +149,58 @@ If it doesn't, step 1 fails with a clear error rather than a silent hang or
 wrong result — but which way that goes needs testing in a real browser to
 know for sure. A scanned PDF with no text layer (just images of pages) also
 won't extract anything — that would need OCR, which isn't built yet.
+
+## Action execution — real clicks, not synthetic events
+
+This is the one feature in this repo that departs from the minimal-
+permission design everything else follows — worth understanding before
+enabling it.
+
+**Why it needs `chrome.debugger`**: a synthetic DOM `MouseEvent` dispatched
+from injected JavaScript has `isTrusted: false`, and plenty of sites'
+event listeners check for that and ignore it. `chrome.debugger` drives the
+click at the Chrome DevTools Protocol / input level instead — the same
+layer real user input goes through — which is why it can act like a
+genuine click. The cost: Chrome shows a persistent **"Vidur is debugging
+this browser"** banner while attached, and it's a permission Chrome Web
+Store reviews more carefully than anything else in this manifest.
+
+**How it works, end to end**:
+1. You type an instruction. `chrome.tabs.captureVisibleTab` takes a
+   screenshot (viewport only — off-screen content needs scrolling into
+   view first, not handled yet).
+2. The screenshot + instruction go to a vision-capable model with a
+   `locate_target` tool call, asking for the location as a **fraction of
+   image width/height** (0-1), not raw pixels — this sidesteps needing to
+   reconcile the screenshot's actual device-pixel resolution against the
+   page's CSS pixel dimensions.
+3. That fraction gets multiplied by the tab's real CSS viewport size
+   (`window.innerWidth/innerHeight`, read via `scripting`) to get the
+   actual click coordinates.
+4. **Nothing has clicked anything yet.** The UI shows the screenshot with a
+   marker at that location and what the model found there — this is a
+   real confirmation step, not a formality, given rule 4 below.
+5. Only on your explicit confirm: a cursor animates to the target (a pure
+   CSS visual, purely for transparency — it does not perform the click
+   itself), then `chrome.debugger` attaches, dispatches
+   `Input.dispatchMouseEvent` (moved → pressed → released), and detaches
+   immediately — attached only for the fraction of a second the actual
+   click sequence takes, not for the session.
+
+**Verified before shipping, not assumed**: the exact CDP command names,
+parameter shapes (`type`/`x`/`y`/`button`/`clickCount`, coordinates in CSS
+pixels relative to the viewport), and the `chrome.debugger.attach` version
+string (`'0.1'` — an early draft of this used `'1.3'`, which is wrong) were
+checked against Chrome's own API docs and the DevTools Protocol reference
+before this was committed, given how much of this feature's correctness
+depends on getting those exact details right.
+
+**What's not handled yet**: scrolling to an off-screen target, typing into
+text fields (only clicking is implemented), and multi-step sequences (one
+instruction = one click, not a chained task). And per the phased-action
+plan in ROADMAP.md, there's no tiering yet — every action goes through the
+same confirm-first flow regardless of how consequential it is, which is
+the safe default but not the final design.
 
 ## Why activeTab instead of `<all_urls>`
 

@@ -80,6 +80,41 @@ body {
 
 .hint { font-size: 11px; color: var(--muted); margin: 0; }
 
+.action-confirm { display: flex; flex-direction: column; gap: 8px; }
+
+.action-preview {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.action-preview img { display: block; width: 100%; }
+
+.action-marker {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.55);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.action-confirm-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.action-confirm-buttons button {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.action-confirm-buttons .save-btn { background: var(--accent); color: #fff; }
+.action-confirm-buttons .cancel-btn { background: var(--bubble-assistant); color: var(--fg); }
+.action-confirm-buttons button:disabled { opacity: 0.5; cursor: default; }
+
 .section-title {
   font-size: 12px;
   text-transform: uppercase;

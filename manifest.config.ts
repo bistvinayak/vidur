@@ -29,7 +29,14 @@ export default defineManifest({
   // the user explicitly invoked it on, and never runs in the background
   // on every site — see README for why. localhost is the one exception,
   // needed to mirror threads to the local web viewer (see server/).
-  permissions: ['activeTab', 'scripting', 'storage', 'sidePanel'],
+  //
+  // debugger is the one real exception to the minimal-permission design:
+  // it's needed for real click actions (src/lib/actions.ts) to simulate a
+  // genuine click via CDP rather than a synthetic DOM event many sites
+  // ignore. Chrome shows a persistent "this extension is debugging this
+  // browser" banner while attached — attach/detach happens only for the
+  // few hundred ms an action actually takes, not for the whole session.
+  permissions: ['activeTab', 'scripting', 'storage', 'sidePanel', 'debugger'],
   host_permissions: ['http://localhost:4300/*'],
   // Lets the local web viewer message the background script directly
   // (chrome.runtime.sendMessage) instead of going through the HTTP mirror —

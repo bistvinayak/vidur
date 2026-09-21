@@ -280,6 +280,97 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 })
 
+/** Runs inside the tab — self-contained, no imports. */
+function getViewportSize(): { width: number; height: number } {
+  return { width: window.innerWidth, height: window.innerHeight }
+}
+
+/**
+ * Runs inside the tab — self-contained, no imports. Purely a visual overlay
+ * for transparency (so the user sees where the click is about to land, the
+ * same "watch it happen" feel as Claude's own browser use) — it does NOT
+ * perform the real click itself. The actual click goes through
+ * chrome.debugger from the background (see performActionClick) since a
+ * synthetic DOM MouseEvent dispatched from injected JS is exactly the kind
+ * of event many sites' listeners can detect and ignore as untrusted.
+ */
+function animateCursorTo(x: number, y: number): Promise<void> {
+  return new Promise((resolve) => {
+    const cursor = document.createElement('div')
+    cursor.style.cssText =
+      'position:fixed;top:0;left:0;width:20px;height:20px;margin:-10px;border-radius:50%;' +
+      'background:rgba(37,99,235,0.55);border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,0.5);' +
+      'z-index:2147483647;pointer-events:none;transition:transform 0.5s ease;' +
+      `transform:translate(${window.innerWidth / 2}px, ${window.innerHeight / 2}px);`
+    document.body.appendChild(cursor)
+    requestAnimationFrame(() => {
+      cursor.style.transform = `translate(${x}px, ${y}px)`
+    })
+    setTimeout(() => {
+      cursor.remove()
+      resolve()
+    }, 650)
+  })
+}
+
+/**
+ * Screenshot + vision-grounded coordinates, capped at the CSS viewport size
+ * of the tab — does not click anything yet. Returns everything the UI needs
+ * to show a confirmation (the screenshot, the description, the location)
+ * before CONFIRM_ACTION_CLICK actually touches the page.
+ */
+async function locateActionTarget(tabId: number, instruction: string) {
+  const tab = await chrome.tabs.get(tabId)
+  if (!tab.windowId) throw new Error('Could not find this tab\'s window.')
+
+  const settings = await getSettings()
+  const provider = getProvider(settings)
+
+  const screenshotDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+  const [{ result: viewport }] = await chrome.scripting.executeScript({ target: { tabId }, func: getViewportSize })
+  if (!viewport) throw new Error('Could not read this page\'s size.')
+
+  const located = await provider.locateElement(screenshotDataUrl, instruction)
+  if (!located.found) {
+    return { ok: true as const, found: false, screenshotDataUrl }
+  }
+
+  return {
+    ok: true as const,
+    found: true,
+    x: Math.round(located.xFraction * viewport.width),
+    y: Math.round(located.yFraction * viewport.height),
+    xFraction: located.xFraction,
+    yFraction: located.yFraction,
+    description: located.description,
+    screenshotDataUrl,
+  }
+}
+
+/**
+ * The actual click — chrome.debugger simulates it at the CDP/input level,
+ * which most sites treat as a genuine user click, unlike a synthetic DOM
+ * MouseEvent. Attaches and detaches immediately around just this one
+ * action, not for the session, to keep Chrome's "being debugged" banner as
+ * brief as possible.
+ */
+async function performActionClick(tabId: number, x: number, y: number): Promise<void> {
+  await chrome.scripting.executeScript({ target: { tabId }, func: animateCursorTo, args: [x, y] })
+
+  const target = { tabId }
+  // '0.1' is what chrome.debugger.attach expects here — not a CDP protocol
+  // version, Chrome's own extension-debugger API version (confirmed against
+  // Chrome's docs; matches major version + minor version-or-greater).
+  await chrome.debugger.attach(target, '0.1')
+  try {
+    await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' })
+    await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+    await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {})
+  }
+}
+
 async function continueThread(threadId: string, userText: string): Promise<Thread> {
   const settings = await getSettings()
   const provider = getProvider(settings)
@@ -351,6 +442,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'CONTINUE_THREAD') {
     continueThread(message.threadId, message.text)
       .then((thread) => sendResponse({ ok: true, thread }))
+      .catch((err) => sendResponse({ ok: false, error: String(err.message ?? err) }))
+    return true
+  }
+
+  if (message?.type === 'LOCATE_ACTION_TARGET') {
+    locateActionTarget(message.tabId, message.instruction)
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: String(err.message ?? err) }))
+    return true
+  }
+
+  if (message?.type === 'CONFIRM_ACTION_CLICK') {
+    performActionClick(message.tabId, message.x, message.y)
+      .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: String(err.message ?? err) }))
     return true
   }

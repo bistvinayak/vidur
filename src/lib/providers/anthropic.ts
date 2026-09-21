@@ -2,19 +2,28 @@ import type { ChatMessage, ExtractedPage } from '../types'
 import {
   buildPageIntro,
   fetchWithTimeout,
+  LOCATE_TARGET_SCHEMA,
   languageInstruction,
   parseFindingsArgs,
+  parseLocateResult,
   REPORT_FINDINGS_SCHEMA,
   sanitizeSummaryText,
+  type LocateResult,
   type ModelProvider,
   type ProviderCallOpts,
   type ProviderResult,
 } from './types'
 
-const TOOL = {
+const REPORT_FINDINGS_TOOL = {
   name: 'report_findings',
   description: 'Report the summary, actionable items, and suggested follow-ups for the page or question.',
   input_schema: REPORT_FINDINGS_SCHEMA,
+}
+
+const LOCATE_TARGET_TOOL = {
+  name: 'locate_target',
+  description: 'Identify the pixel location (as fractions of image size) of the UI element the instruction refers to.',
+  input_schema: LOCATE_TARGET_SCHEMA,
 }
 
 /**
@@ -38,7 +47,20 @@ async function fetchImageAsBase64(url: string): Promise<{ mediaType: string; dat
   }
 }
 
-async function callAnthropic(apiKey: string, model: string, messages: unknown[], maxTokens: number): Promise<ProviderResult> {
+/** A screenshot from chrome.tabs.captureVisibleTab is already a data: URL — the bytes are inline, no fetch needed. */
+function parseDataUrl(dataUrl: string): { mediaType: string; data: string } {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+  if (!match) throw new Error('Expected a data: URL screenshot.')
+  return { mediaType: match[1], data: match[2] }
+}
+
+async function callTool(
+  apiKey: string,
+  model: string,
+  messages: unknown[],
+  maxTokens: number,
+  tool: { name: string; description: string; input_schema: unknown },
+): Promise<{ args: any } | { rawContent: string }> {
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -50,8 +72,8 @@ async function callAnthropic(apiKey: string, model: string, messages: unknown[],
       model,
       max_tokens: maxTokens,
       messages,
-      tools: [TOOL],
-      tool_choice: { type: 'tool', name: 'report_findings' },
+      tools: [tool],
+      tool_choice: { type: 'tool', name: tool.name },
     }),
   })
 
@@ -63,10 +85,17 @@ async function callAnthropic(apiKey: string, model: string, messages: unknown[],
   const data = await res.json()
   const toolUse = data.content?.find((b: any) => b.type === 'tool_use')
   if (!toolUse) {
-    const text = data.content?.find((b: any) => b.type === 'text')?.text ?? ''
-    return { summary: sanitizeSummaryText(text), actionableItems: [], followUps: [] }
+    return { rawContent: data.content?.find((b: any) => b.type === 'text')?.text ?? '' }
   }
-  return parseFindingsArgs(toolUse.input)
+  return { args: toolUse.input }
+}
+
+async function callAnthropic(apiKey: string, model: string, messages: unknown[], maxTokens: number): Promise<ProviderResult> {
+  const result = await callTool(apiKey, model, messages, maxTokens, REPORT_FINDINGS_TOOL)
+  if ('rawContent' in result) {
+    return { summary: sanitizeSummaryText(result.rawContent), actionableItems: [], followUps: [] }
+  }
+  return parseFindingsArgs(result.args)
 }
 
 export function createAnthropicProvider(apiKey: string, model: string): ModelProvider {
@@ -90,6 +119,17 @@ export function createAnthropicProvider(apiKey: string, model: string): ModelPro
         { role: 'user', content: userMessage + languageInstruction(opts.outputLanguage) },
       ]
       return callAnthropic(apiKey, model, messages, 700)
+    },
+
+    async locateElement(screenshotDataUrl: string, instruction: string): Promise<LocateResult> {
+      const { mediaType, data } = parseDataUrl(screenshotDataUrl)
+      const content = [
+        { type: 'text', text: `Find this in the screenshot: "${instruction}". Report its location as fractions of the image's width/height.` },
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
+      ]
+      const result = await callTool(apiKey, model, [{ role: 'user', content }], 300, LOCATE_TARGET_TOOL)
+      if ('rawContent' in result) return { found: false, xFraction: 0, yFraction: 0, description: '' }
+      return parseLocateResult(result.args)
     },
   }
 }

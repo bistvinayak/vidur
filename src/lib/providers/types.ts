@@ -11,10 +11,19 @@ export interface ProviderResult {
   followUps: FollowUp[]
 }
 
+export interface LocateResult {
+  found: boolean
+  xFraction: number // 0-1, fraction of screenshot width — resolution-independent
+  yFraction: number // 0-1, fraction of screenshot height
+  description: string // what the model found there, shown to the user before anything clicks
+}
+
 /** Every provider adapter (OpenRouter, Anthropic, OpenAI) implements this. */
 export interface ModelProvider {
   summarizePage(page: ExtractedPage, opts: ProviderCallOpts): Promise<ProviderResult>
   askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts): Promise<ProviderResult>
+  /** Vision-grounds a text instruction ("click the Add to Cart button") to a point in a screenshot. */
+  locateElement(screenshotDataUrl: string, instruction: string): Promise<LocateResult>
 }
 
 const REQUEST_TIMEOUT_MS = 45_000
@@ -76,6 +85,32 @@ export const REPORT_FINDINGS_SCHEMA = {
     },
   },
   required: ['summary'],
+}
+
+/**
+ * Fractions of image width/height, not pixels — sidesteps needing to know
+ * the screenshot's device pixel ratio vs. the page's CSS pixel dimensions,
+ * which differ (screenshots are taken at the display's actual resolution).
+ * The caller multiplies these by the tab's real CSS viewport size.
+ */
+export const LOCATE_TARGET_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    found: { type: 'boolean', description: 'Whether a matching element is visible in this screenshot at all.' },
+    x_fraction: { type: 'number', description: 'Horizontal center of the target, as a fraction of image width, 0 to 1.' },
+    y_fraction: { type: 'number', description: 'Vertical center of the target, as a fraction of image height, 0 to 1.' },
+    description: { type: 'string', description: 'One short sentence describing exactly what is at that location, for user confirmation before it is clicked.' },
+  },
+  required: ['found'],
+}
+
+export function parseLocateResult(args: any): LocateResult {
+  return {
+    found: Boolean(args.found),
+    xFraction: typeof args.x_fraction === 'number' ? Math.min(1, Math.max(0, args.x_fraction)) : 0,
+    yFraction: typeof args.y_fraction === 'number' ? Math.min(1, Math.max(0, args.y_fraction)) : 0,
+    description: String(args.description ?? ''),
+  }
 }
 
 const MAX_SUMMARY_LENGTH = 4000
