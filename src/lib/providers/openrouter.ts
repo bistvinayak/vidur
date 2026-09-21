@@ -87,7 +87,7 @@ export function createOpenRouterProvider(apiKey: string, preferredModel: string)
       for (const img of page.images.slice(0, 5)) {
         content.push({ type: 'image_url', image_url: { url: img.src } })
       }
-      return callOpenRouter(apiKey, chain, [{ role: 'user', content }], 1500)
+      return callOpenRouter(apiKey, chain, [{ role: 'user', content }], 700)
     },
 
     async askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts) {

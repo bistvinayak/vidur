@@ -120,8 +120,10 @@ export function buildPageIntro(page: ExtractedPage): string {
   const base =
     `Page title: ${page.title}\nURL: ${page.url}\n\n` +
     `Summarize this page and pull out anything actionable — deadlines, prices, red flags, ` +
-    `things worth noticing that aren't just restating the page. Keep the summary a short ` +
-    `paragraph — synthesize, don't enumerate every item if this is a list or search-results ` +
-    `page; call out the few things that actually matter instead.`
+    `things worth noticing that aren't just restating the page. The summary must be under ` +
+    `120 words — a hard limit, not a suggestion. If the page has little real content, say so ` +
+    `briefly rather than padding the summary by restating the same point in different words. ` +
+    `Synthesize, don't enumerate every item if this is a list or search-results page; call out ` +
+    `the few things that actually matter instead.`
   return skill.instructions ? `${base}\n\n${skill.instructions}` : base
 }

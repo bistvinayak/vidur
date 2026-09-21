@@ -81,7 +81,7 @@ export function createAnthropicProvider(apiKey: string, model: string): ModelPro
           content.push({ type: 'image', source: { type: 'base64', media_type: encoded.mediaType, data: encoded.data } })
         }
       }
-      return callAnthropic(apiKey, model, [{ role: 'user', content }], 1500)
+      return callAnthropic(apiKey, model, [{ role: 'user', content }], 700)
     },
 
     async askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts) {

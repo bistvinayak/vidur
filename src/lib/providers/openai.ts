@@ -61,7 +61,7 @@ export function createOpenAIProvider(apiKey: string, model: string): ModelProvid
       for (const img of page.images.slice(0, 5)) {
         content.push({ type: 'image_url', image_url: { url: img.src } })
       }
-      return callOpenAI(apiKey, model, [{ role: 'user', content }], 1500)
+      return callOpenAI(apiKey, model, [{ role: 'user', content }], 700)
     },
 
     async askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts) {
