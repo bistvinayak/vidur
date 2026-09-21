@@ -32,7 +32,7 @@ function buildChain(preferredModel: string): string[] {
   return [preferredModel, ...rest].slice(0, 3)
 }
 
-async function callOpenRouter(apiKey: string, models: string[], messages: unknown[]): Promise<ProviderResult> {
+async function callOpenRouter(apiKey: string, models: string[], messages: unknown[], maxTokens: number): Promise<ProviderResult> {
   const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -44,7 +44,7 @@ async function callOpenRouter(apiKey: string, models: string[], messages: unknow
     body: JSON.stringify({
       models,
       messages,
-      max_tokens: 1500, // was unset — a stalled/reasoning free model can run away without this
+      max_tokens: maxTokens, // lower cap = lower worst-case latency, not just a safety net
       tools: [REPORT_FINDINGS_TOOL],
       tool_choice: { type: 'function', function: { name: 'report_findings' } },
     }),
@@ -87,7 +87,7 @@ export function createOpenRouterProvider(apiKey: string, preferredModel: string)
       for (const img of page.images.slice(0, 5)) {
         content.push({ type: 'image_url', image_url: { url: img.src } })
       }
-      return callOpenRouter(apiKey, chain, [{ role: 'user', content }])
+      return callOpenRouter(apiKey, chain, [{ role: 'user', content }], 1500)
     },
 
     async askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts) {
@@ -95,7 +95,9 @@ export function createOpenRouterProvider(apiKey: string, preferredModel: string)
         ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
         { role: 'user', content: userMessage + languageInstruction(opts.outputLanguage) },
       ]
-      return callOpenRouter(apiKey, chain, messages)
+      // A conversational reply needs far less room than a full page
+      // summary + actionable items — smaller cap, faster worst case.
+      return callOpenRouter(apiKey, chain, messages, 700)
     },
   }
 }

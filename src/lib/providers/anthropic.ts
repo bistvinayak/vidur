@@ -38,7 +38,7 @@ async function fetchImageAsBase64(url: string): Promise<{ mediaType: string; dat
   }
 }
 
-async function callAnthropic(apiKey: string, model: string, messages: unknown[]): Promise<ProviderResult> {
+async function callAnthropic(apiKey: string, model: string, messages: unknown[], maxTokens: number): Promise<ProviderResult> {
   const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -48,7 +48,7 @@ async function callAnthropic(apiKey: string, model: string, messages: unknown[])
     },
     body: JSON.stringify({
       model,
-      max_tokens: 2000,
+      max_tokens: maxTokens,
       messages,
       tools: [TOOL],
       tool_choice: { type: 'tool', name: 'report_findings' },
@@ -81,7 +81,7 @@ export function createAnthropicProvider(apiKey: string, model: string): ModelPro
           content.push({ type: 'image', source: { type: 'base64', media_type: encoded.mediaType, data: encoded.data } })
         }
       }
-      return callAnthropic(apiKey, model, [{ role: 'user', content }])
+      return callAnthropic(apiKey, model, [{ role: 'user', content }], 1500)
     },
 
     async askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts) {
@@ -89,7 +89,7 @@ export function createAnthropicProvider(apiKey: string, model: string): ModelPro
         ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
         { role: 'user', content: userMessage + languageInstruction(opts.outputLanguage) },
       ]
-      return callAnthropic(apiKey, model, messages)
+      return callAnthropic(apiKey, model, messages, 700)
     },
   }
 }

@@ -20,14 +20,14 @@ const TOOL = {
   },
 }
 
-async function callOpenAI(apiKey: string, model: string, messages: unknown[]): Promise<ProviderResult> {
+async function callOpenAI(apiKey: string, model: string, messages: unknown[], maxTokens: number): Promise<ProviderResult> {
   const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
       messages,
-      max_tokens: 1500,
+      max_tokens: maxTokens,
       tools: [TOOL],
       tool_choice: { type: 'function', function: { name: 'report_findings' } },
     }),
@@ -61,7 +61,7 @@ export function createOpenAIProvider(apiKey: string, model: string): ModelProvid
       for (const img of page.images.slice(0, 5)) {
         content.push({ type: 'image_url', image_url: { url: img.src } })
       }
-      return callOpenAI(apiKey, model, [{ role: 'user', content }])
+      return callOpenAI(apiKey, model, [{ role: 'user', content }], 1500)
     },
 
     async askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts) {
@@ -69,7 +69,7 @@ export function createOpenAIProvider(apiKey: string, model: string): ModelProvid
         ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
         { role: 'user', content: userMessage + languageInstruction(opts.outputLanguage) },
       ]
-      return callOpenAI(apiKey, model, messages)
+      return callOpenAI(apiKey, model, messages, 700)
     },
   }
 }
