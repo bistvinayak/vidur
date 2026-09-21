@@ -1,8 +1,28 @@
 import { useEffect, useState } from 'react'
 import { getAllThreads, threadIdForUrl } from '../lib/storage'
-import type { Thread } from '../lib/types'
+import type { ChatMessage, Thread } from '../lib/types'
 
 type View = { name: 'list' } | { name: 'thread'; threadId: string }
+
+function formatMessageForCopy(m: ChatMessage): string {
+  const items = (m.actionableItems ?? []).map((a) => `- ${a.label}${a.detail ? `: ${a.detail}` : ''}`).join('\n')
+  return m.content + (items ? `\n\n${items}` : '')
+}
+
+function formatThreadForCopy(thread: Thread): string {
+  const header = `${thread.title || thread.domain}\n${thread.url}\n`
+  const body = thread.messages.map((m) => `${m.role === 'user' ? 'You' : 'Vidur'}: ${formatMessageForCopy(m)}`).join('\n\n')
+  return `${header}\n${body}`
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
 
 export default function App() {
   const [threads, setThreads] = useState<Thread[]>([])
@@ -12,6 +32,18 @@ export default function App() {
   const [autoSummarizing, setAutoSummarizing] = useState(false)
   const [error, setError] = useState<string | undefined>()
   const [draft, setDraft] = useState('')
+  const [copiedKey, setCopiedKey] = useState<string | undefined>()
+
+  function handleCopy(key: string, text: string) {
+    copyToClipboard(text).then((ok) => {
+      if (ok) {
+        setCopiedKey(key)
+        setTimeout(() => setCopiedKey((k) => (k === key ? undefined : k)), 1500)
+      } else {
+        setError('Could not copy — your browser may be blocking clipboard access.')
+      }
+    })
+  }
 
   const refreshThreads = () => getAllThreads().then(setThreads)
 
@@ -136,11 +168,25 @@ export default function App() {
           ←
         </button>
         <h1 className="truncate">{activeThread.title}</h1>
+        <button
+          className="icon-btn"
+          onClick={() => handleCopy('thread', formatThreadForCopy(activeThread))}
+          title="Copy whole conversation"
+        >
+          {copiedKey === 'thread' ? '✓' : '⧉'}
+        </button>
       </header>
 
       <div className="messages">
         {activeThread.messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>
+            <button
+              className="copy-btn"
+              onClick={() => handleCopy(`msg-${i}`, formatMessageForCopy(m))}
+              title="Copy this message"
+            >
+              {copiedKey === `msg-${i}` ? '✓' : '⧉'}
+            </button>
             <p>{m.content}</p>
             {m.actionableItems && m.actionableItems.length > 0 && (
               <ul className="actionable-list">
