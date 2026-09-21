@@ -1,4 +1,5 @@
 import { getProvider } from '../lib/providers'
+import { selectSkill } from '../lib/skills'
 import { getSettings, getThread, saveSettings, threadIdForUrl, upsertThread } from '../lib/storage'
 import type { ChatMessage, ExtractedPage, Settings, Thread } from '../lib/types'
 
@@ -139,6 +140,7 @@ async function runSummarize(tab: chrome.tabs.Tab): Promise<Thread> {
   thread.messages.push(message)
   thread.updatedAt = Date.now()
   thread.title = page.title
+  thread.skillLabel = selectSkill(page.url).label // keep current even on a pre-existing thread from before this shipped
 
   await upsertThread(thread)
   await pushToLocalMirror(thread)

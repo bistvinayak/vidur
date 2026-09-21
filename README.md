@@ -11,9 +11,12 @@ actionable, and suggests the next question — instead of just re-stating the pa
 - Each page gets its own conversation thread (by URL), browsable in History, with follow-up chat
 - Output language setting (leave blank to match the source page)
 - Per-domain block list as an explicit opt-out
-- Runs on free OpenRouter models with automatic fallback chains — see `src/lib/openrouter.ts`
+- Runs on free OpenRouter models with automatic fallback chains — see `src/lib/providers/openrouter.ts`
 - Every conversation is also mirrored to a **local web page** (`server/`) so it's browsable outside the side panel too — see "Local web viewer" below
 - **Pick your own model provider** — OpenRouter (free), Claude, or GPT — from either the extension's Settings page or the web page's own settings, with a recommended default model per provider
+- **Site-type skills** — a job posting, a LinkedIn profile, an Amazon product, and a search-results page each get a tailored prompt via free URL-pattern routing, not a second model call — see `src/lib/skills/`
+- **Voice** — 🔊 read any message or the whole conversation aloud, 🎤 speak a follow-up instead of typing — native browser APIs, no extra cost
+- **Copy/share** — copy any message or the whole conversation as plain text, on both the side panel and the web page
 
 ## Not in v1 (see ROADMAP.md)
 

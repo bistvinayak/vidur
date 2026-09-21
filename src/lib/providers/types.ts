@@ -1,3 +1,4 @@
+import { selectSkill } from '../skills'
 import type { ActionableItem, ChatMessage, ExtractedPage, FollowUp } from '../types'
 
 export interface ProviderCallOpts {
@@ -115,11 +116,12 @@ export function parseFindingsArgs(args: any): ProviderResult {
 }
 
 export function buildPageIntro(page: ExtractedPage): string {
-  return (
+  const skill = selectSkill(page.url)
+  const base =
     `Page title: ${page.title}\nURL: ${page.url}\n\n` +
     `Summarize this page and pull out anything actionable — deadlines, prices, red flags, ` +
     `things worth noticing that aren't just restating the page. Keep the summary a short ` +
     `paragraph — synthesize, don't enumerate every item if this is a list or search-results ` +
     `page; call out the few things that actually matter instead.`
-  )
+  return skill.instructions ? `${base}\n\n${skill.instructions}` : base
 }

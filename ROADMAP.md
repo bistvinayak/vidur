@@ -4,6 +4,20 @@ Captures everything scoped in planning beyond v1, in the order it was agreed
 to make sense to build — later phases depend on earlier ones being solid,
 not just being a wishlist.
 
+## Shipped ahead of schedule
+
+- **Site-type skills** (`src/lib/skills/`): URL-pattern routing (no extra
+  model call) to a tailored prompt per site type — job posting, profile/
+  portfolio, product page, search/list results, generic fallback. Detected
+  type shows in the UI ("Detected as: Job posting"). Adding a new site type
+  is one new skill entry, no changes to the provider adapters.
+- **Voice, output and input**: native browser `SpeechSynthesis`/
+  `SpeechRecognition` — free, no API key, no new dependency. 🔊 read-aloud on
+  every message and the whole conversation; 🎤 mic button on the composer.
+  This is also the reusable building block v5's accessibility variant needs.
+- **Copy/share**: per-message and whole-conversation copy, on both the side
+  panel and the web page.
+
 ## v2 — Connectors + real price search
 - **Gmail connector via MCP**: draft-only by default, user reviews/sends —
   never auto-send. This is the trust-sensitive one; get it right before any
@@ -25,7 +39,6 @@ not just being a wishlist.
 - **Activity log + undo** where possible — non-negotiable once real actions
   are live, this is what makes "an agent that acts" trustworthy instead of
   scary.
-- Voice: text-to-voice output, then voice input.
 
 ## v4 — Research index
 - Cluster related threads into a "research topic" (semantic similarity +

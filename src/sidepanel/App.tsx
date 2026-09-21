@@ -24,6 +24,22 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+// Native browser TTS/STT — free, no API key, works offline for speech
+// synthesis (recognition needs a connection, but still no key/cost). A paid
+// TTS provider would sound better but isn't worth the cost/latency for v1.
+function speak(text: string, onEnd: () => void) {
+  window.speechSynthesis.cancel() // only one utterance at a time
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.onend = onEnd
+  utterance.onerror = onEnd
+  window.speechSynthesis.speak(utterance)
+}
+
+function getSpeechRecognition(): any {
+  const Impl = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
+  return Impl ? new Impl() : null
+}
+
 export default function App() {
   const [threads, setThreads] = useState<Thread[]>([])
   const [view, setView] = useState<View>({ name: 'list' })
@@ -33,6 +49,8 @@ export default function App() {
   const [error, setError] = useState<string | undefined>()
   const [draft, setDraft] = useState('')
   const [copiedKey, setCopiedKey] = useState<string | undefined>()
+  const [speakingKey, setSpeakingKey] = useState<string | undefined>()
+  const [listening, setListening] = useState(false)
 
   function handleCopy(key: string, text: string) {
     copyToClipboard(text).then((ok) => {
@@ -43,6 +61,30 @@ export default function App() {
         setError('Could not copy — your browser may be blocking clipboard access.')
       }
     })
+  }
+
+  function handleSpeak(key: string, text: string) {
+    if (speakingKey === key) {
+      window.speechSynthesis.cancel()
+      setSpeakingKey(undefined)
+      return
+    }
+    setSpeakingKey(key)
+    speak(text, () => setSpeakingKey((k) => (k === key ? undefined : k)))
+  }
+
+  function handleMic() {
+    const recognition = getSpeechRecognition()
+    if (!recognition) {
+      setError('Voice input is not supported in this browser.')
+      return
+    }
+    recognition.lang = 'en-US'
+    recognition.onresult = (e: any) => setDraft(e.results[0][0].transcript)
+    recognition.onerror = () => setListening(false)
+    recognition.onend = () => setListening(false)
+    setListening(true)
+    recognition.start()
   }
 
   const refreshThreads = () => getAllThreads().then(setThreads)
@@ -150,7 +192,10 @@ export default function App() {
             <li key={t.id}>
               <button className="thread-item" onClick={() => setView({ name: 'thread', threadId: t.id })}>
                 <span className="thread-title">{t.title || t.domain}</span>
-                <span className="thread-domain">{t.domain}</span>
+                <span className="thread-domain">
+                  {t.domain}
+                  {t.skillLabel && t.skillLabel !== 'General page' ? ` · ${t.skillLabel}` : ''}
+                </span>
               </button>
             </li>
           ))}
@@ -170,23 +215,42 @@ export default function App() {
         <h1 className="truncate">{activeThread.title}</h1>
         <button
           className="icon-btn"
+          onClick={() => handleSpeak('thread', formatThreadForCopy(activeThread))}
+          title={speakingKey === 'thread' ? 'Stop' : 'Read whole conversation aloud'}
+        >
+          {speakingKey === 'thread' ? '⏹' : '🔊'}
+        </button>
+        <button
+          className="icon-btn"
           onClick={() => handleCopy('thread', formatThreadForCopy(activeThread))}
           title="Copy whole conversation"
         >
           {copiedKey === 'thread' ? '✓' : '⧉'}
         </button>
       </header>
+      {activeThread.skillLabel && activeThread.skillLabel !== 'General page' && (
+        <p className="hint">Detected as: {activeThread.skillLabel}</p>
+      )}
 
       <div className="messages">
         {activeThread.messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>
-            <button
-              className="copy-btn"
-              onClick={() => handleCopy(`msg-${i}`, formatMessageForCopy(m))}
-              title="Copy this message"
-            >
-              {copiedKey === `msg-${i}` ? '✓' : '⧉'}
-            </button>
+            <div className="bubble-actions">
+              <button
+                className="copy-btn"
+                onClick={() => handleSpeak(`msg-${i}`, formatMessageForCopy(m))}
+                title={speakingKey === `msg-${i}` ? 'Stop' : 'Read aloud'}
+              >
+                {speakingKey === `msg-${i}` ? '⏹' : '🔊'}
+              </button>
+              <button
+                className="copy-btn"
+                onClick={() => handleCopy(`msg-${i}`, formatMessageForCopy(m))}
+                title="Copy this message"
+              >
+                {copiedKey === `msg-${i}` ? '✓' : '⧉'}
+              </button>
+            </div>
             <p>{m.content}</p>
             {m.actionableItems && m.actionableItems.length > 0 && (
               <ul className="actionable-list">
@@ -224,9 +288,12 @@ export default function App() {
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Ask a follow-up…"
+          placeholder={listening ? 'Listening…' : 'Ask a follow-up…'}
           disabled={busy}
         />
+        <button type="button" className="mic-btn" onClick={handleMic} disabled={busy || listening} title="Speak instead">
+          {listening ? '●' : '🎤'}
+        </button>
         <button type="submit" disabled={busy || !draft.trim()}>
           Send
         </button>

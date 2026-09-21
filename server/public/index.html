@@ -25,9 +25,11 @@
   .main { flex: 1; overflow-y: auto; padding: 24px; max-width: 720px; }
   .main h2 { margin-top: 0; }
   .main a.source-link { font-size: 12px; color: var(--muted); }
-  .bubble { position: relative; border-radius: 10px; padding: 10px 32px 10px 14px; font-size: 14px; line-height: 1.5; max-width: 90%; margin-bottom: 12px; white-space: pre-wrap; }
-  .copy-btn { position: absolute; top: 8px; right: 8px; background: none; border: none; cursor: pointer; font-size: 13px; opacity: 0.55; color: inherit; padding: 2px; line-height: 1; }
+  .bubble { position: relative; border-radius: 10px; padding: 10px 56px 10px 14px; font-size: 14px; line-height: 1.5; max-width: 90%; margin-bottom: 12px; white-space: pre-wrap; }
+  .bubble-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 2px; }
+  .copy-btn { background: none; border: none; cursor: pointer; font-size: 13px; opacity: 0.55; color: inherit; padding: 2px; line-height: 1; }
   .copy-btn:hover { opacity: 1; }
+  .mic-btn { background: var(--bubble-assistant); border: 1px solid var(--border); color: var(--fg); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
   .main-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .bubble.assistant { background: var(--bubble-assistant); }
   .bubble.user { background: var(--bubble-user); color: #fff; margin-left: auto; }
@@ -47,7 +49,7 @@
   .modal h2 { margin-top: 0; font-size: 15px; }
   .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
   .field label { font-size: 12px; font-weight: 600; }
-  .field .hint { font-size: 11px; color: var(--muted); margin: 0; }
+  .hint { font-size: 11px; color: var(--muted); margin: 0; }
   .field input, .field select { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 13px; background: var(--bg); color: var(--fg); font-family: inherit; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
   .modal-actions button { border: none; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
@@ -144,7 +146,7 @@
     el.innerHTML = threads.map(t => `
       <button class="thread-item ${t.id === activeId ? 'active' : ''}" data-id="${escapeAttr(t.id)}">
         <span class="title">${escapeHtml(t.title || t.domain)}</span>
-        <span class="domain">${escapeHtml(t.domain)}</span>
+        <span class="domain">${escapeHtml(t.domain)}${t.skillLabel && t.skillLabel !== 'General page' ? ' · ' + escapeHtml(t.skillLabel) : ''}</span>
       </button>
     `).join('')
     el.querySelectorAll('.thread-item').forEach(btn => {
@@ -174,6 +176,30 @@
     })
   }
 
+  let currentUtteranceBtn = null
+  function speakBtnClick(btn, text) {
+    if (currentUtteranceBtn === btn) {
+      window.speechSynthesis.cancel()
+      btn.textContent = '🔊'
+      currentUtteranceBtn = null
+      return
+    }
+    window.speechSynthesis.cancel()
+    if (currentUtteranceBtn) currentUtteranceBtn.textContent = '🔊'
+    const utterance = new SpeechSynthesisUtterance(text)
+    const reset = () => { btn.textContent = '🔊'; currentUtteranceBtn = null }
+    utterance.onend = reset
+    utterance.onerror = reset
+    btn.textContent = '⏹'
+    currentUtteranceBtn = btn
+    window.speechSynthesis.speak(utterance)
+  }
+
+  function getSpeechRecognition() {
+    const Impl = window.SpeechRecognition || window.webkitSpeechRecognition
+    return Impl ? new Impl() : null
+  }
+
   function selectThread(id) {
     activeId = id
     renderList()
@@ -184,15 +210,20 @@
     main.innerHTML = `
       <div class="main-header">
         <h2>${escapeHtml(thread.title || thread.domain)}</h2>
-        <button class="icon-btn" id="copy-thread-btn" title="Copy whole conversation">⧉</button>
+        <div>
+          <button class="icon-btn" id="speak-thread-btn" title="Read whole conversation aloud">🔊</button>
+          <button class="icon-btn" id="copy-thread-btn" title="Copy whole conversation">⧉</button>
+        </div>
       </div>
       <a class="source-link" href="${escapeAttr(thread.url)}" target="_blank" rel="noopener">${escapeHtml(thread.url)}</a>
+      ${thread.skillLabel && thread.skillLabel !== 'General page' ? `<p class="hint" style="margin-top:4px">Detected as: ${escapeHtml(thread.skillLabel)}</p>` : ''}
       <div style="margin-top:16px">
         ${thread.messages.map(renderMessage).join('')}
         ${sending ? '<div class="bubble assistant thinking">Thinking…</div>' : ''}
       </div>
       <form class="composer" id="composer">
         <input id="composer-input" placeholder="Ask a follow-up…" ${sending ? 'disabled' : ''} autocomplete="off" />
+        <button type="button" class="mic-btn" id="mic-btn" title="Speak instead">🎤</button>
         <button type="submit" ${sending ? 'disabled' : ''}>Send</button>
       </form>
       <p class="composer-error" id="composer-error" hidden></p>
@@ -203,10 +234,32 @@
       const text = input.value.trim()
       if (text) sendReply(thread.id, text)
     })
+    document.getElementById('mic-btn').addEventListener('click', (e) => {
+      const recognition = getSpeechRecognition()
+      const input = document.getElementById('composer-input')
+      if (!recognition) {
+        const el = document.getElementById('composer-error')
+        el.textContent = 'Voice input is not supported in this browser.'
+        el.hidden = false
+        return
+      }
+      recognition.lang = 'en-US'
+      recognition.onresult = (ev) => { input.value = ev.results[0][0].transcript }
+      recognition.onstart = () => { e.target.textContent = '●'; input.placeholder = 'Listening…' }
+      const reset = () => { e.target.textContent = '🎤'; input.placeholder = 'Ask a follow-up…' }
+      recognition.onerror = reset
+      recognition.onend = reset
+      recognition.start()
+    })
     document.getElementById('copy-thread-btn').addEventListener('click', (e) => copyBtnClick(e.target, formatThreadForCopy(thread)))
+    document.getElementById('speak-thread-btn').addEventListener('click', (e) => speakBtnClick(e.target, formatThreadForCopy(thread)))
     document.querySelectorAll('.copy-msg-btn').forEach(btn => {
       const msg = thread.messages[Number(btn.dataset.idx)]
       btn.addEventListener('click', (e) => copyBtnClick(e.target, formatMessageForCopy(msg)))
+    })
+    document.querySelectorAll('.speak-msg-btn').forEach(btn => {
+      const msg = thread.messages[Number(btn.dataset.idx)]
+      btn.addEventListener('click', (e) => speakBtnClick(e.target, formatMessageForCopy(msg)))
     })
   }
 
@@ -248,7 +301,10 @@
       ? `<ul class="actionable-list">${m.actionableItems.map(a => `<li><strong>${escapeHtml(a.label)}</strong>${a.detail ? ' — ' + escapeHtml(a.detail) : ''}</li>`).join('')}</ul>`
       : ''
     return `<div class="bubble ${m.role}">
-      <button class="copy-btn copy-msg-btn" data-idx="${idx}" title="Copy this message">⧉</button>
+      <div class="bubble-actions">
+        <button class="copy-btn speak-msg-btn" data-idx="${idx}" title="Read aloud">🔊</button>
+        <button class="copy-btn copy-msg-btn" data-idx="${idx}" title="Copy this message">⧉</button>
+      </div>
       ${escapeHtml(m.content)}${items}
     </div>`
   }

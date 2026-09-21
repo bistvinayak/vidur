@@ -25,6 +25,7 @@ export interface Thread {
   createdAt: number
   updatedAt: number
   messages: ChatMessage[]
+  skillLabel?: string // e.g. "Job posting" — which src/lib/skills/ entry matched this URL
 }
 
 export interface ExtractedPage {
