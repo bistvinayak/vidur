@@ -1,3 +1,4 @@
+import { extractPdfText } from '../lib/pdf'
 import { getProvider } from '../lib/providers'
 import { selectSkill } from '../lib/skills'
 import { getSettings, getThread, saveSettings, threadIdForUrl, upsertThread } from '../lib/storage'
@@ -91,6 +92,100 @@ function extractPageContent(): ExtractedPage {
   }
 }
 
+function isPdfUrl(url: string): boolean {
+  return /\.pdf(\?|#|$)/i.test(url)
+}
+
+/**
+ * Runs inside the tab (via chrome.scripting.executeScript), same as
+ * extractPageContent — self-contained, no imports. Fetches the PDF's own
+ * bytes from within its own document context: same-origin, uses the page's
+ * own session/cookies automatically, and needs no extension host_permissions
+ * for arbitrary sites. Returns base64 since executeScript results must be
+ * structured-cloneable and a raw ArrayBuffer of a large PDF is worth
+ * avoiding as a giant JSON array of numbers.
+ */
+function fetchPdfAsBase64(): Promise<string> {
+  return fetch(location.href)
+    .then((res) => res.arrayBuffer())
+    .then((buf) => {
+      const bytes = new Uint8Array(buf)
+      let binary = ''
+      const CHUNK = 0x8000
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+      }
+      return btoa(binary)
+    })
+}
+
+/**
+ * Combines per-frame extractions into one page. An iframe's own title/url
+ * (e.g. a viewer sub-app served from a different subdomain) isn't
+ * meaningful — the frame with a real title is treated as the primary one
+ * for those fields, while text and images are pooled across every frame.
+ */
+function mergeFrameResults(frames: ExtractedPage[]): ExtractedPage | undefined {
+  if (frames.length === 0) return undefined
+  const primary = frames.find((f) => f.title) ?? frames[0]
+
+  const text = frames
+    .map((f) => f.text)
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, 20000)
+
+  const seen = new Set<string>()
+  const images: { src: string; alt: string }[] = []
+  for (const frame of frames) {
+    for (const img of frame.images) {
+      if (seen.has(img.src)) continue
+      seen.add(img.src)
+      images.push(img)
+    }
+  }
+
+  return { url: primary.url, title: primary.title, text, images: images.slice(0, 8) }
+}
+
+async function extractHtmlPage(tab: chrome.tabs.Tab): Promise<ExtractedPage | undefined> {
+  // allFrames: many sites (Perusall and similar reading/annotation tools
+  // included) render the actual document inside an iframe, not the top
+  // frame — without this, extraction silently only ever saw the page shell
+  // (nav, sidebars) and missed the real content entirely.
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id!, allFrames: true },
+    func: extractPageContent,
+  })
+  return mergeFrameResults(results.map((r) => r.result).filter((r): r is ExtractedPage => Boolean(r)))
+}
+
+async function extractPdfPage(tab: chrome.tabs.Tab): Promise<ExtractedPage | undefined> {
+  let base64: string
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id! },
+      func: fetchPdfAsBase64,
+    })
+    if (!result) throw new Error('empty result')
+    base64 = result
+  } catch (err) {
+    // Chrome's own built-in PDF viewer may block script injection entirely —
+    // a real platform restriction, not something retrying fixes.
+    throw new Error(
+      "Couldn't access this PDF (" +
+        String((err as Error)?.message ?? err) +
+        ") — Chrome's built-in PDF viewer may be blocking extension access to it.",
+    )
+  }
+
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+  const text = await extractPdfText(bytes)
+  if (!text) throw new Error('Could not extract any text from this PDF — it may be a scanned image with no text layer.')
+
+  return { url: tab.url!, title: tab.title || 'PDF document', text, images: [] }
+}
+
 /**
  * Does the actual work, given a Tab that's guaranteed to have activeTab
  * access — either because it's the exact tab object chrome.action.onClicked
@@ -108,10 +203,7 @@ async function runSummarize(tab: chrome.tabs.Tab): Promise<Thread> {
     throw new Error(`${domain} is on your blocked list — this page won't be read.`)
   }
 
-  const [{ result: page }] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: extractPageContent,
-  })
+  const page = isPdfUrl(tab.url) ? await extractPdfPage(tab) : await extractHtmlPage(tab)
   if (!page) throw new Error('Could not read this page.')
 
   const { summary, actionableItems, followUps } = await provider.summarizePage(page, {

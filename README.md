@@ -17,6 +17,8 @@ actionable, and suggests the next question — instead of just re-stating the pa
 - **Site-type skills** — a job posting, a LinkedIn profile, an Amazon product, and a search-results page each get a tailored prompt via free URL-pattern routing, not a second model call — see `src/lib/skills/`
 - **Voice** — 🔊 read any message or the whole conversation aloud, 🎤 speak a follow-up instead of typing — native browser APIs, no extra cost
 - **Copy/share** — copy any message or the whole conversation as plain text, on both the side panel and the web page
+- **PDF support** — a `.pdf` tab gets its text extracted (via `pdfjs-dist`, workerless) and summarized the same way as any other page. See "PDF support" below for how this works and its one real limitation.
+- **Reads content inside iframes**, not just the top frame — needed for sites (reading/annotation tools especially) that embed the actual document in a sub-frame
 
 ## Not in v1 (see ROADMAP.md)
 
@@ -117,6 +119,35 @@ page's own Settings (gear icon top-left) let you pick:
 All three go through the same `ModelProvider` interface
 (`src/lib/providers/`), so `src/background/index.ts` doesn't know or care
 which one is active.
+
+## PDF support
+
+Chrome's own built-in PDF viewer isn't a normal web page, so the usual
+DOM-scraping approach (`extractPageContent`) can't read it at all — a PDF
+tab needs a completely different path:
+
+1. When the active tab's URL ends in `.pdf`, a small script is injected into
+   that tab (via `activeTab` + `scripting`, same permission as everything
+   else — no new host access needed) that does `fetch(location.href)` from
+   **inside the PDF's own document context**. That's same-origin and
+   automatically carries the page's own session/cookies, which is why this
+   doesn't need broader permissions even for a PDF behind a login.
+2. The bytes come back to the background script, which parses them with
+   `pdfjs-dist` running in its **legacy, workerless build** — confirmed by
+   testing that pdfjs's default build assumes a browser environment an MV3
+   service worker doesn't fully provide, and that service workers can't
+   spawn the nested Worker pdfjs normally wants anyway. Loaded via dynamic
+   `import()`, so its ~500KB only loads when a PDF is actually opened, not
+   on every service worker cold start.
+3. Extracted text feeds into the exact same summarization pipeline as any
+   other page.
+
+**The one real limitation, unresolved without live testing**: whether
+Chrome allows script injection into its *own* built-in PDF viewer at all.
+If it doesn't, step 1 fails with a clear error rather than a silent hang or
+wrong result — but which way that goes needs testing in a real browser to
+know for sure. A scanned PDF with no text layer (just images of pages) also
+won't extract anything — that would need OCR, which isn't built yet.
 
 ## Why activeTab instead of `<all_urls>`
 
