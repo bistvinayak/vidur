@@ -20,6 +20,7 @@ actionable, and suggests the next question — instead of just re-stating the pa
 - **PDF support** — a `.pdf` tab gets its text extracted (via `pdfjs-dist`, workerless) and summarized the same way as any other page. See "PDF support" below for how this works and its one real limitation.
 - **Reads content inside iframes**, not just the top frame — needed for sites (reading/annotation tools especially) that embed the actual document in a sub-frame
 - **Take an action** — type an instruction ("click the Add to Cart button"), Vidur screenshots the page, a vision model locates it, and you see exactly where it'll click — with a screenshot preview and marker — before confirming. Real click, not a suggestion: see "Action execution" below for how this works and why it needs a new, more sensitive permission than everything else here.
+- **Langfuse tracing** (opt-in, off by default) — every conversation thread becomes one Langfuse trace, with every summary and follow-up logged as a generation inside it: the exact prompt sent, the raw response, which model actually served it (meaningful given the OpenRouter fallback chain), and how long each call took. See "Langfuse tracing" below.
 
 ## Not in v1 (see ROADMAP.md)
 
@@ -201,6 +202,50 @@ instruction = one click, not a chained task). And per the phased-action
 plan in ROADMAP.md, there's no tiering yet — every action goes through the
 same confirm-first flow regardless of how consequential it is, which is
 the safe default but not the final design.
+
+## Langfuse tracing
+
+Off by default — this is a real data-sharing decision (full prompts and
+model responses leave the browser for your Langfuse project when it's on),
+not just a debug flag.
+
+**What "one agent thread" means here**: every conversation thread (keyed the
+same way threads already are — by page URL) becomes **one Langfuse trace**.
+The initial summarize and every follow-up in that conversation log as
+separate **generations nested under that same trace**, so opening the trace
+in Langfuse shows the whole conversation's model activity in one place, not
+scattered across disconnected log lines.
+
+**What each generation captures**: the exact text sent to the model (not a
+paraphrase — the literal prompt, page content included), the raw response,
+which model actually answered (meaningful specifically for OpenRouter, where
+the configured "preferred" model isn't necessarily the one that responded,
+given the 3-model fallback chain), and start/end timestamps for latency.
+
+**Setup**: enable it in Settings (extension or web page), then paste in a
+Langfuse public key + secret key from your own Langfuse project (cloud or
+self-hosted — the host field is editable, defaults to
+`https://cloud.langfuse.com`). Same "bring your own credential" pattern as
+the model providers — nothing is bundled, nothing sent anywhere but the
+Langfuse project you configure.
+
+**Verified before shipping**: the SDK's own type definitions confirmed which
+Node-only code paths (`node:fs`/`node:crypto`) exist and that they're gated
+behind an environment check our service worker never triggers — it takes
+the same "edge runtime" branch Cloudflare Workers/Vercel edge functions use,
+via the standard `crypto` global. Confirmed by an actual build (no bundling
+errors) and a real call against Langfuse's live API with placeholder
+credentials — it reached the real endpoint and got a structured `401`, not
+a malformed-request error, and `flushAsync()` resolved cleanly without
+throwing even on that failure, confirming a bad Langfuse config can't break
+the actual summarize/follow-up flow.
+
+**Why every generation flushes immediately** (`client.flushAsync()`) rather
+than relying on the SDK's default background batching interval: the same
+category of risk as the request-hang bug found earlier in this project — an
+MV3 service worker can be torn down between events, and a batch still
+sitting in memory when that happens is silently lost. Flushing eagerly
+trades a little latency for not dropping trace data.
 
 ## Why activeTab instead of `<all_urls>`
 

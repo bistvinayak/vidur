@@ -51,7 +51,7 @@ async function callTool(
   messages: unknown[],
   maxTokens: number,
   tool: { type: 'function'; function: { name: string; description: string; parameters: unknown } },
-): Promise<{ args: any } | { rawContent: string }> {
+): Promise<({ args: any } | { rawContent: string }) & { model: string }> {
   const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -75,28 +75,33 @@ async function callTool(
   }
 
   const data = await res.json()
+  // Which model actually served this — meaningful here specifically because
+  // of the 3-model fallback chain; the preferred model isn't necessarily
+  // the one that responded.
+  const model = data.model ?? models[0]
   const toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
   if (!toolCall) {
-    return { rawContent: data.choices?.[0]?.message?.content ?? '' }
+    return { rawContent: data.choices?.[0]?.message?.content ?? '', model }
   }
   try {
-    return { args: JSON.parse(toolCall.function.arguments) }
+    return { args: JSON.parse(toolCall.function.arguments), model }
   } catch {
     throw new Error('The model returned a malformed response — try again, or switch models in Settings.')
   }
 }
 
-async function callOpenRouter(apiKey: string, models: string[], messages: unknown[], maxTokens: number): Promise<ProviderResult> {
+async function callOpenRouter(apiKey: string, models: string[], messages: unknown[], maxTokens: number, promptText: string): Promise<ProviderResult> {
   const result = await callTool(apiKey, models, messages, maxTokens, REPORT_FINDINGS_TOOL)
+  const trace = { model: result.model, promptText }
   if ('rawContent' in result) {
     // Model ignored tool_choice (happens on some free models, e.g. Inkling
     // which has no tool calling, or a reasoning model that emitted its own
     // <think>/<tool_call> text instead of a real structured call) — sanitize
     // before treating raw text as the summary, since it can otherwise carry
     // leaked chat-template artifacts straight into the UI.
-    return { summary: sanitizeSummaryText(result.rawContent), actionableItems: [], followUps: [] }
+    return { summary: sanitizeSummaryText(result.rawContent), actionableItems: [], followUps: [], trace }
   }
-  return parseFindingsArgs(result.args)
+  return { ...parseFindingsArgs(result.args), trace }
 }
 
 export function createOpenRouterProvider(apiKey: string, preferredModel: string): ModelProvider {
@@ -104,24 +109,23 @@ export function createOpenRouterProvider(apiKey: string, preferredModel: string)
 
   return {
     async summarizePage(page: ExtractedPage, opts: ProviderCallOpts) {
-      const content: unknown[] = [{ type: 'text', text: buildPageIntro(page) + languageInstruction(opts.outputLanguage) + `\n\nPage content:\n${page.text}` }]
+      const promptText = buildPageIntro(page) + languageInstruction(opts.outputLanguage) + `\n\nPage content:\n${page.text}`
+      const content: unknown[] = [{ type: 'text', text: promptText }]
       // Sending the remote URL directly — most OpenRouter providers fetch it
       // server-side. Switch to fetching + base64-encoding if a chosen model
       // can't reach a given host (auth-gated images, some CDNs).
       for (const img of page.images.slice(0, 5)) {
         content.push({ type: 'image_url', image_url: { url: img.src } })
       }
-      return callOpenRouter(apiKey, chain, [{ role: 'user', content }], 700)
+      return callOpenRouter(apiKey, chain, [{ role: 'user', content }], 700, promptText)
     },
 
     async askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts) {
-      const messages = [
-        ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
-        { role: 'user', content: userMessage + languageInstruction(opts.outputLanguage) },
-      ]
+      const userContent = userMessage + languageInstruction(opts.outputLanguage)
+      const messages = [...priorMessages.map((m) => ({ role: m.role, content: m.content })), { role: 'user', content: userContent }]
       // A conversational reply needs far less room than a full page
       // summary + actionable items — smaller cap, faster worst case.
-      return callOpenRouter(apiKey, chain, messages, 700)
+      return callOpenRouter(apiKey, chain, messages, 700, userContent)
     },
 
     async locateElement(screenshotDataUrl: string, instruction: string): Promise<LocateResult> {

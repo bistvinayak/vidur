@@ -9,6 +9,11 @@ export interface ProviderResult {
   summary: string
   actionableItems: ActionableItem[]
   followUps: FollowUp[]
+  /** Set only for observability (Langfuse tracing) — never shown in the chat UI itself. */
+  trace?: {
+    model: string // which model actually served this (matters for OpenRouter's fallback chain)
+    promptText: string // the text portion of what was actually sent
+  }
 }
 
 export interface LocateResult {

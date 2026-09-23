@@ -136,6 +136,56 @@ export default function App() {
         <p className="hint">Vidur only ever runs when you click it — this list is an extra opt-out for sensitive sites.</p>
       </div>
 
+      <div className="field">
+        <label>
+          <input
+            type="checkbox"
+            checked={settings.langfuseEnabled}
+            onChange={(e) => setSettings({ ...settings, langfuseEnabled: e.target.checked })}
+          />{' '}
+          Send traces to Langfuse
+        </label>
+        <p className="hint">
+          Off by default — enabling this sends the full prompt and response for every summary and follow-up to your
+          Langfuse project, so you can inspect exactly what each conversation thread sent and got back. This is a real
+          data-sharing decision, not just a debug toggle.
+        </p>
+      </div>
+
+      {settings.langfuseEnabled && (
+        <>
+          <div className="field">
+            <label htmlFor="lf-public">Langfuse public key</label>
+            <input
+              id="lf-public"
+              value={settings.langfusePublicKey}
+              onChange={(e) => setSettings({ ...settings, langfusePublicKey: e.target.value })}
+              placeholder="pk-lf-…"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="lf-secret">Langfuse secret key</label>
+            <input
+              id="lf-secret"
+              type="password"
+              value={settings.langfuseSecretKey}
+              onChange={(e) => setSettings({ ...settings, langfuseSecretKey: e.target.value })}
+              placeholder="sk-lf-…"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="lf-host">Langfuse host</label>
+            <input
+              id="lf-host"
+              value={settings.langfuseHost}
+              onChange={(e) => setSettings({ ...settings, langfuseHost: e.target.value })}
+              placeholder="https://cloud.langfuse.com"
+            />
+            <p className="hint">Change this if you're self-hosting Langfuse instead of using their cloud.</p>
+          </div>
+        </>
+      )}
+
       <button className="primary-btn" onClick={handleSave}>
         Save
       </button>

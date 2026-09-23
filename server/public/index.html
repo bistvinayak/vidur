@@ -374,6 +374,24 @@
             <label>Output language</label>
             <input id="s-lang" value="${escapeAttr(settings.outputLanguage || '')}" placeholder="Leave blank to match the page's language" />
           </div>
+          <div class="field">
+            <label><input type="checkbox" id="s-langfuse-enabled" ${settings.langfuseEnabled ? 'checked' : ''} /> Send traces to Langfuse</label>
+            <p class="hint">Off by default — sends the full prompt/response for every call to your Langfuse project.</p>
+          </div>
+          <div id="s-langfuse-fields" ${settings.langfuseEnabled ? '' : 'hidden'}>
+            <div class="field">
+              <label>Langfuse public key</label>
+              <input id="s-lf-public" value="${escapeAttr(settings.langfusePublicKey || '')}" placeholder="pk-lf-…" />
+            </div>
+            <div class="field">
+              <label>Langfuse secret key</label>
+              <input id="s-lf-secret" type="password" placeholder="${settings.langfuseSecretKeySet ? 'Already set — leave blank to keep it' : 'sk-lf-…'}" />
+            </div>
+            <div class="field">
+              <label>Langfuse host</label>
+              <input id="s-lf-host" value="${escapeAttr(settings.langfuseHost || '')}" placeholder="https://cloud.langfuse.com" />
+            </div>
+          </div>
           <p class="composer-error" id="s-error" hidden></p>
           <div class="modal-actions">
             <button class="cancel-btn" id="settings-cancel">Cancel</button>
@@ -396,6 +414,9 @@
 
     document.getElementById('s-provider').addEventListener('change', (e) => refreshProviderFields(e.target.value))
     document.getElementById('settings-cancel').addEventListener('click', () => { root.innerHTML = '' })
+    document.getElementById('s-langfuse-enabled').addEventListener('change', (e) => {
+      document.getElementById('s-langfuse-fields').hidden = !e.target.checked
+    })
 
     document.getElementById('settings-save').addEventListener('click', async () => {
       const providerKey = document.getElementById('s-provider').value
@@ -404,9 +425,14 @@
         provider: providerKey,
         outputLanguage: document.getElementById('s-lang').value.trim(),
         [p.modelField]: document.getElementById('s-model').value,
+        langfuseEnabled: document.getElementById('s-langfuse-enabled').checked,
+        langfusePublicKey: document.getElementById('s-lf-public').value.trim(),
+        langfuseHost: document.getElementById('s-lf-host').value.trim(),
       }
       const keyValue = document.getElementById('s-key').value.trim()
       if (keyValue) update[p.keyField] = keyValue // blank = leave existing key untouched
+      const lfSecret = document.getElementById('s-lf-secret').value.trim()
+      if (lfSecret) update.langfuseSecretKey = lfSecret // same blank-means-keep rule as the provider keys
 
       try {
         await callExtension({ type: 'SAVE_SETTINGS', settings: update })

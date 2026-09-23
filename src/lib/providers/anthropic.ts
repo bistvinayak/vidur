@@ -90,35 +90,33 @@ async function callTool(
   return { args: toolUse.input }
 }
 
-async function callAnthropic(apiKey: string, model: string, messages: unknown[], maxTokens: number): Promise<ProviderResult> {
+async function callAnthropic(apiKey: string, model: string, messages: unknown[], maxTokens: number, promptText: string): Promise<ProviderResult> {
   const result = await callTool(apiKey, model, messages, maxTokens, REPORT_FINDINGS_TOOL)
+  const trace = { model, promptText }
   if ('rawContent' in result) {
-    return { summary: sanitizeSummaryText(result.rawContent), actionableItems: [], followUps: [] }
+    return { summary: sanitizeSummaryText(result.rawContent), actionableItems: [], followUps: [], trace }
   }
-  return parseFindingsArgs(result.args)
+  return { ...parseFindingsArgs(result.args), trace }
 }
 
 export function createAnthropicProvider(apiKey: string, model: string): ModelProvider {
   return {
     async summarizePage(page: ExtractedPage, opts: ProviderCallOpts) {
-      const content: unknown[] = [
-        { type: 'text', text: buildPageIntro(page) + languageInstruction(opts.outputLanguage) + `\n\nPage content:\n${page.text}` },
-      ]
+      const promptText = buildPageIntro(page) + languageInstruction(opts.outputLanguage) + `\n\nPage content:\n${page.text}`
+      const content: unknown[] = [{ type: 'text', text: promptText }]
       for (const img of page.images.slice(0, 5)) {
         const encoded = await fetchImageAsBase64(img.src)
         if (encoded) {
           content.push({ type: 'image', source: { type: 'base64', media_type: encoded.mediaType, data: encoded.data } })
         }
       }
-      return callAnthropic(apiKey, model, [{ role: 'user', content }], 700)
+      return callAnthropic(apiKey, model, [{ role: 'user', content }], 700, promptText)
     },
 
     async askFollowUp(priorMessages: ChatMessage[], userMessage: string, opts: ProviderCallOpts) {
-      const messages = [
-        ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
-        { role: 'user', content: userMessage + languageInstruction(opts.outputLanguage) },
-      ]
-      return callAnthropic(apiKey, model, messages, 700)
+      const userContent = userMessage + languageInstruction(opts.outputLanguage)
+      const messages = [...priorMessages.map((m) => ({ role: m.role, content: m.content })), { role: 'user', content: userContent }]
+      return callAnthropic(apiKey, model, messages, 700, userContent)
     },
 
     async locateElement(screenshotDataUrl: string, instruction: string): Promise<LocateResult> {

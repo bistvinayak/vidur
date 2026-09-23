@@ -30,6 +30,11 @@ not just being a wishlist.
   tiering by consequence (every action currently confirms, regardless of
   how reversible it is), a per-site action whitelist, typing into fields
   (click-only so far), and an activity log/undo.
+- **Langfuse tracing** (opt-in, off by default): one Langfuse trace per
+  conversation thread, every summarize/follow-up logged as a generation
+  nested under it — full prompt, full response, which model actually
+  answered (matters for OpenRouter's fallback chain), and latency. See
+  README.md's "Langfuse tracing" section.
 
 ## v2 — Connectors + real price search
 - **Gmail connector via MCP**: draft-only by default, user reviews/sends —

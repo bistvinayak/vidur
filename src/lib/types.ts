@@ -94,4 +94,12 @@ export interface Settings {
 
   outputLanguage: string // e.g. "English", "Hindi", "Spanish" — empty = match source
   blockedDomains: string[] // domains the extension should never read
+
+  // Off by default: enabling this sends full prompts and model responses to
+  // Langfuse (your own project there) for every call — a real data-sharing
+  // decision, not just a debugging toggle. See README's "Langfuse tracing".
+  langfuseEnabled: boolean
+  langfusePublicKey: string
+  langfuseSecretKey: string
+  langfuseHost: string // e.g. https://cloud.langfuse.com, or a self-hosted URL
 }

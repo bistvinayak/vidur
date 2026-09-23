@@ -1,3 +1,4 @@
+import { logGeneration, startOrUpdateTrace } from '../lib/langfuse'
 import { extractPdfText } from '../lib/pdf'
 import { getProvider } from '../lib/providers'
 import { selectSkill } from '../lib/skills'
@@ -16,7 +17,7 @@ chrome.runtime.onInstalled.addListener(() => {
 })
 
 const LOCAL_MIRROR_URL = 'http://localhost:4300/api/threads'
-const KEY_FIELDS = ['openrouterApiKey', 'anthropicApiKey', 'openaiApiKey'] as const
+const KEY_FIELDS = ['openrouterApiKey', 'anthropicApiKey', 'openaiApiKey', 'langfuseSecretKey'] as const
 
 /**
  * Settings crossing to the web page (a page's own JS/devtools, not the
@@ -206,11 +207,37 @@ async function runSummarize(tab: chrome.tabs.Tab): Promise<Thread> {
   const page = isPdfUrl(tab.url) ? await extractPdfPage(tab) : await extractHtmlPage(tab)
   if (!page) throw new Error('Could not read this page.')
 
-  const { summary, actionableItems, followUps } = await provider.summarizePage(page, {
-    outputLanguage: settings.outputLanguage,
+  const id = threadIdForUrl(page.url)
+  await startOrUpdateTrace(settings, { threadId: id, name: page.title || domain, url: page.url })
+
+  const startTime = new Date()
+  let result
+  try {
+    result = await provider.summarizePage(page, { outputLanguage: settings.outputLanguage })
+  } catch (err) {
+    await logGeneration(settings, {
+      threadId: id,
+      name: 'summarize',
+      model: 'unknown',
+      input: '',
+      output: '',
+      startTime,
+      endTime: new Date(),
+      error: String((err as Error)?.message ?? err),
+    })
+    throw err
+  }
+  const { summary, actionableItems, followUps, trace } = result
+  await logGeneration(settings, {
+    threadId: id,
+    name: 'summarize',
+    model: trace?.model ?? 'unknown',
+    input: trace?.promptText ?? '',
+    output: summary,
+    startTime,
+    endTime: new Date(),
   })
 
-  const id = threadIdForUrl(page.url)
   const existing = await getThread(id)
   const message: ChatMessage = {
     role: 'assistant',
@@ -381,8 +408,34 @@ async function continueThread(threadId: string, userText: string): Promise<Threa
   const userMessage: ChatMessage = { role: 'user', content: userText, createdAt: Date.now() }
   thread.messages.push(userMessage)
 
-  const { summary, actionableItems, followUps } = await provider.askFollowUp(thread.messages, userText, {
-    outputLanguage: settings.outputLanguage,
+  // Same trace id as the initial summarize — this follow-up nests under the
+  // same Langfuse trace as one continuous conversation, not a new one.
+  const startTime = new Date()
+  let result
+  try {
+    result = await provider.askFollowUp(thread.messages, userText, { outputLanguage: settings.outputLanguage })
+  } catch (err) {
+    await logGeneration(settings, {
+      threadId,
+      name: 'follow_up',
+      model: 'unknown',
+      input: userText,
+      output: '',
+      startTime,
+      endTime: new Date(),
+      error: String((err as Error)?.message ?? err),
+    })
+    throw err
+  }
+  const { summary, actionableItems, followUps, trace } = result
+  await logGeneration(settings, {
+    threadId,
+    name: 'follow_up',
+    model: trace?.model ?? 'unknown',
+    input: trace?.promptText ?? userText,
+    output: summary,
+    startTime,
+    endTime: new Date(),
   })
 
   thread.messages.push({

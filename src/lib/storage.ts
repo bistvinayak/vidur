@@ -14,6 +14,10 @@ const DEFAULT_SETTINGS: Settings = {
   openaiModel: OPENAI_MODELS.find((m) => m.recommended)!.id,
   outputLanguage: '',
   blockedDomains: [],
+  langfuseEnabled: false,
+  langfusePublicKey: '',
+  langfuseSecretKey: '',
+  langfuseHost: 'https://cloud.langfuse.com',
 }
 
 export async function getSettings(): Promise<Settings> {

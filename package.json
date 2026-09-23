@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "express": "^5.2.1",
+    "langfuse": "^3.39.2",
     "pdfjs-dist": "^6.3.289",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
