@@ -3,6 +3,14 @@
 A browser extension that summarizes the page you're on, surfaces what's actually
 actionable, and suggests the next question — instead of just re-stating the page.
 
+![Vidur architecture](diagrams/architecture.png)
+
+*Generated with the [archify](https://github.com/tt-a1i/archify) skill from
+[`diagrams/vidur.architecture.json`](diagrams/vidur.architecture.json) — that
+file is the source of truth if the architecture changes; regenerate the image
+rather than hand-editing it. An interactive version (pan/zoom/theme toggle) is
+at [`diagrams/vidur-architecture.html`](diagrams/vidur-architecture.html).*
+
 ## What's in v1
 
 - Click the Vidur toolbar icon on any page — that both opens the side panel and summarizes the page you were on. (This has to be the trigger, not a button inside an already-open panel — see "Why the toolbar icon, not a button" below.)

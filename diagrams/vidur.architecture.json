@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Vidur Architecture",
+    "output": "vidur-architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1385, 700]
+  },
+  "components": [
+    { "id": "panel", "type": "frontend", "label": "Side Panel", "sublabel": "React UI", "pos": [40, 40], "size": [160, 64] },
+    { "id": "webapp", "type": "frontend", "label": "Companion Web App", "sublabel": "localhost:4300", "pos": [1180, 40], "size": [180, 64] },
+    { "id": "worker", "type": "backend", "label": "Background Service Worker", "sublabel": "MV3 orchestrator", "pos": [560, 260], "size": [220, 76] },
+    { "id": "page", "type": "external", "label": "Web Page", "sublabel": "active tab", "pos": [40, 560], "size": [160, 60] },
+    { "id": "providers", "type": "cloud", "label": "Model Providers", "sublabel": "OpenRouter / Claude / GPT", "pos": [280, 560], "size": [170, 60] },
+    { "id": "storage", "type": "database", "label": "chrome.storage.local", "sublabel": "threads + settings", "pos": [580, 560], "size": [180, 60] },
+    { "id": "debugger", "type": "security", "label": "Chrome DevTools Protocol", "sublabel": "real click execution", "pos": [800, 560], "size": [190, 60] },
+    { "id": "langfuse", "type": "external", "label": "Langfuse", "sublabel": "optional tracing", "pos": [1040, 560], "size": [150, 60] },
+    { "id": "server", "type": "backend", "label": "Local Express Server", "sublabel": "thread mirror", "pos": [1180, 260], "size": [180, 64] }
+  ],
+  "connections": [
+    { "id": "panel-to-worker", "from": "panel", "to": "worker", "label": "chrome.runtime messages", "variant": "emphasis" },
+    { "id": "worker-to-page", "from": "worker", "to": "page", "label": "extract / screenshot / click" },
+    { "id": "worker-to-providers", "from": "worker", "to": "providers", "label": "summarize / locate" },
+    { "id": "worker-to-storage", "from": "worker", "to": "storage", "label": "read / write", "labelDy": 24 },
+    { "id": "worker-to-debugger", "from": "worker", "to": "debugger", "label": "dispatch click" },
+    { "id": "worker-to-langfuse", "from": "worker", "to": "langfuse", "label": "log trace", "variant": "dashed" },
+    { "id": "worker-to-server", "from": "worker", "to": "server", "label": "mirror thread (POST)", "labelAt": [860, 220] },
+    { "id": "webapp-to-server", "from": "webapp", "to": "server", "label": "fetch threads (GET)", "labelDy": 24 },
+    { "id": "webapp-to-worker", "from": "webapp", "to": "worker", "label": "reply / settings", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Entry points", "items": ["Toolbar icon click is the one reliable trigger", "Companion web app mirrors the same history"] },
+    { "dot": "emerald", "title": "Provider-agnostic", "items": ["OpenRouter (free, 3-model fallback), Claude, or GPT", "User-selectable at runtime"] },
+    { "dot": "rose", "title": "Minimal permissions", "items": ["activeTab-only for reading pages", "chrome.debugger only for confirmed click actions"] }
+  ]
+}

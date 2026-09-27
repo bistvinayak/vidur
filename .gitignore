@@ -6,3 +6,9 @@ dist
 *.log
 server/data/
 server/dev-key.pem
+
+# Local agent-skill tooling (npx skills add) — dev tooling, not part of the
+# shipped extension. skills-lock.json / .agents/.claude are per-machine.
+.agents/
+.claude/
+skills-lock.json
